@@ -79,6 +79,23 @@ graph TB
 | **IAM module** | Roles, policies | Cross-project |
 | **ALB module** | Load balancer, listeners | Cross-project |
 
+### CloudFormation Modules
+
+CloudFormation Modules (`AWS::CloudFormation::ModuleVersion`) package a set of resources as a reusable, versioned building block that can be referenced directly in a template's `Resources` section, unlike nested stacks which deploy as separate child stacks.
+
+| Approach | Deployment Unit | Versioning | Use Case |
+|----------|-----------------|------------|----------|
+| **Modules** | Inline resource type in same stack | Registry-versioned | Reusable resource patterns (e.g., standard S3 bucket + policy) |
+| **Nested Stacks** | Separate child stack | Template-versioned | Larger, independently manageable components |
+
+### Multi-Account/Region Deployment
+
+| Approach | Description | Use Case |
+|----------|-------------|----------|
+| **StackSets** | Deploy stacks across accounts/regions from one operation | Centralized governance, org-wide baselines |
+| **Service-managed permissions** | StackSets via AWS Organizations | Automatic deployment to new accounts/OUs |
+| **Self-managed permissions** | IAM roles per account | Non-Organizations multi-account setups |
+
 ---
 
 ## Parameters & Conditions
@@ -116,7 +133,7 @@ graph TB
 | **Fn::And** | Logical AND | Multiple conditions |
 | **Fn::Or** | Logical OR | Alternative conditions |
 | **Fn::Not** | Logical NOT | Negation |
-| **Fn::Contains** | List contains value | Value in list |
+| **Fn::Contains** | List contains value (Rules section only) | Parameter validation in Rules |
 
 ---
 
@@ -178,6 +195,22 @@ graph LR
 | **Remove** | Deleted resources | High |
 | **Replace** | New resource, same logical ID | High |
 | **Import** | Existing resource into stack | Medium |
+
+---
+
+## CloudFormation Hooks
+
+### Proactive Compliance
+
+| Component | Description | Use Case |
+|-----------|-------------|----------|
+| **Hook** | Runs before a create/update/delete is provisioned | Block or warn on non-compliant resources |
+| **Guard-based Hook** | Hook logic authored in CloudFormation Guard DSL, no Lambda needed | Policy-as-code checks (tagging, encryption, sizing) |
+| **Lambda-based Hook** | Custom logic via the CloudFormation Hooks CLI/SDK | Complex or external validation |
+| **Target actions** | CREATE, UPDATE, DELETE | Scope enforcement to specific operations |
+| **Failure mode** | FAIL (block) or WARN (allow with notice) | Rollout without breaking existing pipelines |
+
+Hooks run before drift can occur, complementing drift detection (which is reactive) with proactive, pre-provisioning compliance checks.
 
 ---
 

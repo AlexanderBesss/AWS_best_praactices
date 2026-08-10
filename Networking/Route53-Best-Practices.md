@@ -34,9 +34,9 @@
 
 | Type | Description | Use Case |
 |------|-------------|----------|
-| **Endpoint** | HTTP/HTTPS, TCP, HTTPS over STR | Application health |
+| **Endpoint** | HTTP/HTTPS, TCP, HTTPS with string matching | Application health |
 | **CloudWatch Alarm** | Based on CloudWatch metric | Custom health criteria |
-| **Health Check of Health Checks** | Combine multiple checks | Complex health logic |
+| **Calculated Health Check** | Combine multiple child health checks with AND/OR/NOT logic | Complex health logic |
 
 ### Health Check Configuration
 
@@ -58,7 +58,7 @@
 | **Multiple regions** | At least 3 for accuracy |
 | **Alarm integration** | CloudWatch alarms for notification |
 | **Failover testing** | Regular failover drills |
-| **Cost awareness** | $0.50/check/month + requests |
+| **Cost awareness** | ~$0.50/check/month (AWS endpoints); higher for non-AWS endpoints and optional features (fast interval, latency, string matching) |
 
 ```mermaid
 flowchart LR
@@ -166,6 +166,25 @@ flowchart LR
 
 ---
 
+## Application Recovery Controller (ARC)
+
+Route 53 ARC is a separate set of capabilities (beyond DNS health checks/failover) for building and testing recovery across AZs, Regions, and on-premises:
+
+| Component | Description | Use Case |
+|-----------|-------------|----------|
+| **Readiness checks** | Continuously audit resource configuration/capacity/quota parity across replicas | Catch drift before a failover is needed |
+| **Routing controls** | Highly available on/off switches (backed by a 5-endpoint redundant cluster) that gate traffic shifting | Deterministic, low-latency failover trigger |
+| **Recovery groups / cells** | Model application recovery scope and dependencies | Structure multi-region DR |
+| **Zonal shift / zonal autoshift** | Shift traffic away from an impaired AZ (via ELB/ASG) in minutes, with optional automatic shift | Fast AZ-level mitigation without a full DR failover |
+
+| Practice | Description |
+|----------|-------------|
+| **Use routing controls, not DNS TTLs, for time-critical failover** | Routing control state changes propagate faster and more reliably than relying on DNS caching behavior |
+| **Run readiness checks continuously** | Confirms standby region/AZ can actually absorb failover traffic |
+| **Test zonal shift regularly** | Validates AZ-level mitigation without waiting for a real incident |
+
+---
+
 ## Traffic Flow
 
 ### Traffic Flow Features
@@ -228,7 +247,7 @@ flowchart LR
 | Component | Price |
 |-----------|-------|
 | **Hosted zone** | $0.50/month |
-| **Health check** | $0.50/month + $0.0001 per check |
+| **Health check** | $0.50/month (AWS endpoints) or $0.75/month (non-AWS endpoints); optional features (fast interval, string matching, latency measurement) add extra per-feature cost |
 | **DNS queries** | $0.40 per M queries (first 1B) |
 | **Resource record sets** | $0.50/month per 1,000 (above included 1,000) |
 
@@ -246,3 +265,4 @@ flowchart LR
 | Shield | DDoS protection | DNS DDoS mitigation |
 | ACM | SSL certificate validation | Domain ownership |
 | Transfer Family | SFTP endpoint routing | File transfer |
+| Application Recovery Controller | Readiness checks, routing controls, zonal shift | Multi-AZ/Region failover orchestration |

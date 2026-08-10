@@ -14,17 +14,17 @@
 
 ### Subnet Sizing
 
-| CIDR | Hosts | Use Case |
+| CIDR | Usable Hosts | Use Case |
 |------|-------|----------|
-| /28 | 8 | Minimum, NAT gateway, single instance |
-| /27 | 16 | Small deployments |
-| /26 | 28 | Medium deployments |
-| /25 | 56 | Large deployments |
-| /24 | 252 | Standard, recommended minimum |
-| /23 | 508 | High-density deployments |
-| /22 | 1020 | Very large deployments |
+| /28 | 11 | Minimum subnet size, NAT gateway, single instance |
+| /27 | 27 | Small deployments |
+| /26 | 59 | Medium deployments |
+| /25 | 123 | Large deployments |
+| /24 | 251 | Standard, recommended default |
+| /23 | 507 | High-density deployments |
+| /22 | 1019 | Very large deployments |
 
-> **Note:** AWS reserves 5 IPs in each subnet (first 4 and last).
+> **Note:** AWS reserves 5 IPs in each subnet (network address, VPC router, DNS, future use, and broadcast address), and /28 is the smallest subnet AWS allows.
 
 ```mermaid
 graph TB
@@ -69,7 +69,7 @@ graph TB
 
 | Component | Purpose | Placement |
 |-----------|---------|-----------|
-| **Internet Gateway (IGW)** | NAT for public subnets | One per VPC, region-wide |
+| **Internet Gateway (IGW)** | Direct (non-NAT) two-way internet access for resources with public IPs | One per VPC, horizontally scaled and highly available |
 | **NAT Gateway** | Outbound internet for private subnets | One per AZ in public subnet |
 | **NAT Instance** | Low-cost alternative to NAT GW | Public subnet with public IP/Elastic IP |
 
@@ -98,7 +98,7 @@ graph TB
 | Method | Latency | Bandwidth | Use Case |
 |--------|---------|-----------|----------|
 | **VPC Peering** | Low | Up to VPC limit | Simple, 1-to-1 connections |
-| **Transit Gateway** | Low | Up to 125 Gbps | Hub-and-spoke, many VPCs |
+| **Transit Gateway** | Low | Up to 50 Gbps per VPC attachment | Hub-and-spoke, many VPCs |
 | **Direct Connect** | Lowest | Up to 100 Gbps | Dedicated, predictable performance |
 | **Site-to-Site VPN** | Low-Medium | Up to 1.25 Gbps | Quick hybrid connectivity |
 | **Client VPN** | Low-Medium | Per-user | Remote worker access |
@@ -152,6 +152,16 @@ graph LR
 | **Database** | TCP/5432 from app SG only | TCP/443 to S3 endpoint, TCP/443 to patch repos, TCP/5432 to replicas |
 | **Bastion Host** | TCP/22 from corporate IP only | All to private subnets |
 | **Batch Worker** | None (or from coordinator SG) | TCP/443 to S3 VPC endpoint |
+
+---
+
+## AWS Network Firewall & Gateway Load Balancer
+
+| Component | Purpose | Placement |
+|-----------|---------|-----------|
+| **AWS Network Firewall** | Stateful, managed IDS/IPS and traffic filtering (domain, protocol, signature-based rules) | Dedicated inspection subnet/VPC, typically routed via Transit Gateway |
+| **Gateway Load Balancer (GWLB)** | Transparently insert third-party virtual appliances (firewalls, IDS/IPS) inline | Centralized inspection VPC, paired with GWLB endpoints in spoke VPCs |
+| **Centralized Inspection Architecture** | Route inter-VPC/internet traffic through a shared inspection VPC | Combine with Transit Gateway for hub-and-spoke traffic inspection |
 
 ---
 

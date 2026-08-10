@@ -53,10 +53,12 @@ flowchart TD
 | **AWSManagedRulesSQLiRuleSet** | SQL injection protection | Free |
 | **AWSManagedRulesUnixRuleSet** | Unix exploit protection | Free |
 | **AWSManagedRulesWindowsRuleSet** | Windows exploit protection | Free |
-| **AWSManagedRulesAdminProtection** | Admin path protection | Free |
-| **AWSManagedRulesAPIProtocol** | API protocol compliance | Free |
+| **AWSManagedRulesAdminProtectionRuleSet** | Admin path protection | Free |
+| **AWSManagedRulesKnownBadInputsRuleSet** | Known exploit patterns (Log4j, etc.) | Free |
+| **AWSManagedRulesWordPressRuleSet** | WordPress protection | Free |
 | **AWSManagedRulesBotControlRuleSet** | Bot detection and control | Paid |
-| **AWSManagedRulesWordPressRuleSet** | WordPress protection | Paid |
+| **AWSManagedRulesATPRuleSet** | Account takeover (fraud control) prevention | Paid |
+| **AWSManagedRulesACFPRuleSet** | Account creation fraud prevention | Paid |
 
 ### Recommendation
 

@@ -49,7 +49,7 @@
 | **Administrative principal** | Designate specific IAM role, not root |
 | **Least privilege** | Grant only required actions |
 | **Multi-Region keys** | Enable for DR scenarios (no backup key feature) |
-| **Rotation** | Enable automatic annual rotation |
+| **Rotation** | Enable automatic rotation (default annual; customizable 90 days-7 years) |
 | **Policy validation** | Test before deployment |
 
 ```mermaid
@@ -133,9 +133,9 @@ flowchart LR
 
 | Method | Frequency | Description |
 |--------|-----------|-------------|
-| **Automatic** | Annual (AWS-managed) | Enable rotation |
+| **Automatic** | Annual by default; configurable rotation period from 90 days to 2,560 days (7 years) | Enable rotation, optionally set a custom period |
 | **Manual** | As needed | Create new key, migrate |
-| **Custom** | Via EventBridge (CloudWatch Events) | Custom schedule |
+| **On-demand** | Immediate | Rotate key material outside the automatic schedule, independent of automatic rotation setting |
 
 ### Rotation Best Practices
 
@@ -145,7 +145,7 @@ flowchart LR
 | **Test after rotation** | Verify decryption works |
 | **Monitor rotation** | CloudWatch events for rotation |
 | **Document rotation** | Track rotation history |
-| **Plan for migration** | Manual rotation requires data re-encryption |
+| **Plan for migration** | Manual rotation (creating a new key) requires re-encrypting data; automatic/on-demand rotation of a key's backing material does not require re-encryption |
 
 ---
 

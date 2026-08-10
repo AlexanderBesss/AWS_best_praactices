@@ -30,8 +30,8 @@ Building resilient serverless architectures requires defense-in-depth error hand
 | **SNS → Lambda** | SNS retry | Exponential backoff, ~15 hours | Custom DeliveryPolicy |
 | **SNS → SQS** | SNS retry | Exponential backoff | Custom DeliveryPolicy |
 | **DynamoDB Stream** | Event Source Mapping | 18,000 retries (~6 hours) | 0-18,000 |
-| **EventBridge** | Rule retry | 180-210 min with backoff | Dead-letter target (DLQ) |
-| **Step Functions** | Catch/Retry state | No retry | MaxAttempts: unlimited |
+| **EventBridge** | Rule retry | Up to 24h, 185 attempts, exponential backoff + jitter | `MaximumEventAgeInSeconds` (60-86400), `MaximumRetryAttempts` (0-185), Dead-letter target (DLQ) |
+| **Step Functions** | Catch/Retry state | No retry unless `Retry` is declared | `MaxAttempts`: 3 default, up to 99,999,999 |
 | **API Gateway** | No built-in retry | Returns error | Client-side or Lambda |
 
 ---
@@ -74,11 +74,7 @@ graph LR
   "throttlePolicy": {
     "maxReceivesPerSecond": 500
   },
-  "sicklyRetryPolicy": null,
-  "thresholds": {
-    "throttle": 3,
-    "sickly": 20
-  }
+  "sicklyRetryPolicy": null
 }
 ```
 
@@ -189,17 +185,22 @@ graph TB
 
 ### Powertools Circuit Breaker Example
 
+Powertools for AWS Lambda (Python) ships a `circuit_breaker` decorator (currently under the `circuit_breaker_alpha` namespace — pin your Powertools version, as the API may still change before GA):
+
 ```python
-from aws_lambda_powertools.utilities.idempotency import IDempotencyConfig
-from aws_lambda_powertools.utilities.data_classes import event_source
-from aws_lambda_powertools.utilities.batch import BatchProcessor
+from aws_lambda_powertools.utilities.circuit_breaker_alpha import circuit_breaker, CircuitBreakerError
 
-processor = BatchProcessor()
+@circuit_breaker(failure_threshold=5, recovery_timeout=30)
+def call_downstream_service(payload):
+    # Call to downstream dependency (HTTP, DB, etc.)
+    return downstream_client.invoke(payload)
 
-@processor.processor
-def process_record(record):
-    # Your processing logic
-    return True
+def lambda_handler(event, context):
+    try:
+        return call_downstream_service(event)
+    except CircuitBreakerError:
+        # Circuit is OPEN — return a fallback response instead of calling downstream
+        return {"status": "degraded", "message": "Service temporarily unavailable"}
 ```
 
 ### When NOT to Use

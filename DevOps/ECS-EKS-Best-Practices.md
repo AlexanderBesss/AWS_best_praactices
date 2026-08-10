@@ -12,8 +12,8 @@
 | **Cost** | Lower (Fargate or EC2) | Higher (control plane fee) |
 | **Ecosystem** | AWS-native | Kubernetes ecosystem |
 | **Networking** | Bridge, awsvpc, host | CNI (pod networking) |
-| **Service mesh** | App Mesh | Istio, Linkerd, App Mesh |
-| **Auto-scaling** | ECS Service, Cluster | HPA, VPA, Cluster Autoscaler |
+| **Service mesh** | ECS Service Connect, App Mesh (deprecated) | Istio, Linkerd, Cilium |
+| **Auto-scaling** | ECS Service, Cluster | HPA, VPA, Cluster Autoscaler, Karpenter, EKS Auto Mode |
 | **Portability** | AWS-only | Multi-cloud |
 | **Best for** | AWS-centric, simplicity | Kubernetes expertise, multi-cloud |
 
@@ -101,15 +101,30 @@ graph TB
 | **Self-Managed Node Group** | User-managed EC2 nodes | Custom AMI, configuration |
 | **Fargate Profile** | Serverless pods | Variable workloads |
 | **Spot Instances** | Spot-priced nodes | Cost-optimized, fault-tolerant |
+| **EKS Auto Mode** | AWS-managed nodes, scaling (Karpenter), and add-ons | Minimal operational overhead |
 
-### Cluster Autoscaler
+### Kubernetes Version Support
+
+| Support Tier | Duration | Coverage |
+|--------------|----------|----------|
+| **Standard support** | 14 months from release | Control plane, EKS-published AMIs, add-ons |
+| **Extended support** | Next 12 months (26 months total) | Control plane patches, critical AMI/add-on patches (additional cost) |
+
+Upgrade clusters before standard support ends to avoid the extended-support surcharge; extended support is available for Kubernetes 1.21 and later.
+
+### Node/Cluster Autoscaling
+
+| Tool | Approach | Recommendation |
+|------|----------|----------------|
+| **Karpenter** | Direct EC2 API provisioning, bin-packing, fast scale-up (~1 min) | Preferred for new EKS clusters on AWS |
+| **Cluster Autoscaler** | Scales existing Auto Scaling Groups/node groups | Simpler multi-cloud-portable option; slower scale-up |
+| **EKS Auto Mode** | AWS-managed compute using Karpenter under the hood | Lowest operational overhead, less low-level control |
 
 | Setting | Recommendation |
 |---------|---------------|
-| **Enable Cluster Autoscaler** | For managed node groups |
 | **Minimum nodes** | Match baseline load |
 | **Maximum nodes** | Match peak capacity plan |
-| **Scale-down delay** | 10 minutes (default) |
+| **Scale-down delay** | 10 minutes (Cluster Autoscaler default) |
 | **Spot instances** | Mix with on-demand for resilience |
 
 ---
@@ -131,7 +146,8 @@ graph TB
 |----------|-------------|----------|
 | **HPA (Horizontal Pod Autoscaler)** | Pod count based on metrics | CPU, memory, custom |
 | **VPA (Vertical Pod Autoscaler)** | Resource requests/limits | Right-sizing pods |
-| **Cluster Autoscaler** | Node count based on pending pods | Cluster scaling |
+| **Karpenter** | Node provisioning/consolidation via direct EC2 API calls | Preferred node autoscaler on AWS |
+| **Cluster Autoscaler** | Node count based on pending pods, via ASGs | Multi-cloud-portable node scaling |
 | **KEDA** | Event-driven autoscaling | Queue length, events |
 
 ### Scaling Metrics
@@ -149,7 +165,9 @@ graph TB
 
 ## Service Mesh
 
-### App Mesh
+> **AWS App Mesh is deprecated.** New customer onboarding closed in September 2024, and AWS will discontinue App Mesh support (console and resources) effective September 30, 2026. For new workloads, use **ECS Service Connect** (built-in ECS service discovery and traffic management) for ECS, or a third-party mesh (Istio, Linkerd, Cilium) for EKS. Existing App Mesh customers should plan migration before the end-of-support date.
+
+### App Mesh (Deprecated)
 
 | Component | Description |
 |-----------|-------------|
@@ -300,7 +318,8 @@ graph TB
 |---------|------------|---------|
 | ALB/NLB | Container ingress | Load balancing |
 | CloudMap | Service discovery | DNS-based discovery |
-| App Mesh | Service mesh | Traffic management |
+| ECS Service Connect | Service discovery + traffic management | Built-in ECS service-to-service networking |
+| App Mesh (deprecated) | Service mesh | Traffic management (migrate before Sep 2026) |
 | CloudWatch | Container Insights | Monitoring |
 | X-Ray | Distributed tracing | Debugging |
 | Secrets Manager | Secret injection | Secure credentials |

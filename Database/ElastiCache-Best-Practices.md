@@ -2,14 +2,17 @@
 
 ## Engine Selection
 
-### Redis vs Memcached
+> **Engine naming note:** Redis OSS forked into **Valkey** (Linux Foundation project) after Redis Inc. changed its licensing in 2024. Amazon ElastiCache now offers three engine options: **Valkey** (recommended for new workloads — actively developed, BSD-licensed, API-compatible with Redis OSS 7.2), **Redis OSS** (AWS supports up to the last BSD-licensed version, 7.1; available on a maintenance/extended-support track for existing workloads), and **Memcached**. New deployments should default to Valkey unless a specific Redis OSS-only feature or client compatibility issue requires otherwise.
 
-| Feature | Redis | Memcached |
+### Valkey/Redis OSS vs Memcached
+
+| Feature | Valkey / Redis OSS | Memcached |
 |---------|-------|-----------|
 | **Data structures** | Strings, lists, sets, sorted sets, hashes, streams | Strings, binary blobs |
 | **Persistence** | RDB snapshots, AOF | None (ephemeral only) |
 | **High Availability** | Multi-AZ with automatic failover | No built-in HA |
 | **Clustering** | Sharding with replication | Sharding only |
+| **Serverless option** | Yes (ElastiCache Serverless) | Yes (ElastiCache Serverless) |
 | **Pub/Sub** | Yes | No |
 | **Transactions** | MULTI/EXEC | No |
 | **Lua scripting** | Yes | No |
@@ -21,14 +24,15 @@
 
 | Use Case | Recommended Engine | Reason |
 |----------|-------------------|--------|
-| Session store | Redis | Persistence, replication |
-| Leaderboard | Redis | Sorted sets |
-| Simple caching | Either | Memcached simpler, Redis more features |
-| Message queue | Redis | Streams, pub/sub |
-| Real-time analytics | Redis | Data structures, aggregation |
-| Geospatial | Redis | Geospatial commands |
-| Rate limiting | Redis | Atomic operations, sorted sets |
+| Session store | Valkey / Redis OSS | Persistence, replication |
+| Leaderboard | Valkey / Redis OSS | Sorted sets |
+| Simple caching | Either | Memcached simpler, Valkey more features |
+| Message queue | Valkey / Redis OSS | Streams, pub/sub |
+| Real-time analytics | Valkey / Redis OSS | Data structures, aggregation |
+| Geospatial | Valkey / Redis OSS | Geospatial commands |
+| Rate limiting | Valkey / Redis OSS | Atomic operations, sorted sets |
 | High-throughput cache | Memcached | Simpler, multi-threaded |
+| Unpredictable/spiky workloads | ElastiCache Serverless (Valkey, Redis OSS, or Memcached) | No capacity planning, scales automatically |
 
 ---
 
@@ -36,15 +40,17 @@
 
 ### Instance Classes
 
-| Class | Generation | vCPU | Memory | Use Case |
+| Class | Generation | vCPU | Memory (approx.) | Use Case |
 |-------|-----------|------|--------|----------|
-| cache.t4g.micro | Graviton 2 | 2 | 1 GB | Dev/test, small workloads |
-| cache.t4g.medium | Graviton 2 | 2 | 4 GB | Small production |
-| cache.r6g.large | Graviton 2 | 2 | 16 GB | Memory-optimized |
-| cache.r6g.xlarge | Graviton 2 | 4 | 32 GB | Medium workloads |
-| cache.r6g.2xlarge | Graviton 2 | 8 | 64 GB | Large workloads |
-| cache.r7g.xlarge | Graviton 3 | 4 | 32 GB | Next-gen memory |
-| cache.r7g.4xlarge | Graviton 3 | 16 | 128 GB | Very large workloads |
+| cache.t4g.micro | Graviton 2 | 2 | 0.5 GiB | Dev/test, small workloads |
+| cache.t4g.medium | Graviton 2 | 2 | ~3.1 GiB | Small production |
+| cache.r6g.large | Graviton 2 | 2 | ~13 GiB | Memory-optimized |
+| cache.r6g.xlarge | Graviton 2 | 4 | ~26 GiB | Medium workloads |
+| cache.r6g.2xlarge | Graviton 2 | 8 | ~53 GiB | Large workloads |
+| cache.r7g.xlarge | Graviton 3 | 4 | ~26 GiB | Next-gen memory |
+| cache.r7g.4xlarge | Graviton 3 | 16 | ~106 GiB | Very large workloads |
+
+> Exact usable memory per node type is reserved/adjusted by ElastiCache and can change — verify current values in the [ElastiCache node type documentation](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/CacheNodes.SupportedTypes.html) before capacity planning. For variable or hard-to-predict workloads, consider **ElastiCache Serverless** instead of manually selecting node types.
 
 ### Sizing Guidelines
 
@@ -57,14 +63,15 @@
 
 ---
 
-## Redis Architecture
+## Valkey / Redis OSS Architecture
 
 ### Deployment Modes
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| **Redis (Redis)** | Single node or Multi-AZ | Simplicity, HA |
-| **Redis Cluster Mode** | Sharded, auto-resharding | Large datasets, high throughput |
+| **Cluster Mode Disabled** | Single shard, primary + up to 5 replicas, Multi-AZ | Simplicity, HA, smaller datasets |
+| **Cluster Mode Enabled** | Sharded, auto-resharding | Large datasets, high throughput |
+| **ElastiCache Serverless** | Fully managed, scales capacity automatically, no node/shard management | Unpredictable or spiky workloads, minimal ops overhead |
 | **Memcached** | Multi-node, application-managed sharding | Simple caching |
 
 ```mermaid
@@ -105,7 +112,7 @@ graph TB
 | **Automatic resharding** | Add/remove shards without downtime |
 | **Cross-slot operations** | Not supported (design keys carefully) |
 | **Hash tags** | Force related keys to same slot |
-| **Max shards** | 1,024 per cluster |
+| **Max shards** | Up to 500 per cluster (default quota 90; requires Valkey 7.2+ or Redis OSS 5.0.6+ for the higher limit) |
 
 ### Multi-AZ Configuration
 
@@ -120,7 +127,7 @@ graph TB
 
 ## Performance Tuning
 
-### Redis-Specific Tuning
+### Valkey/Redis OSS-Specific Tuning
 
 | Parameter | Description | Recommendation |
 |-----------|-------------|----------------|
@@ -155,7 +162,7 @@ graph TB
 
 ## Persistence
 
-### Redis Persistence Options
+### Valkey/Redis OSS Persistence Options
 
 | Method | RPO | Performance Impact | Use Case |
 |--------|-----|-------------------|----------|
@@ -184,7 +191,7 @@ graph TB
 | **VPC placement** | Private subnets only | CRITICAL |
 | **Encryption at rest** | Enable with KMS | CRITICAL |
 | **Encryption in transit** | TLS/SSL required | HIGH |
-| **Auth token** | Set Redis password | HIGH |
+| **Auth token** | Set Valkey/Redis AUTH token (or use RBAC users) | HIGH |
 | **Security groups** | Restrict to application SGs | HIGH |
 | **Parameter group** | Disable dangerous commands | MEDIUM |
 | **IAM auth** | Use IAM for ElastiCache API | MEDIUM |
@@ -238,9 +245,11 @@ graph TB
 | **Reserved Nodes** | 1 or 3-year commitment | Up to 70% |
 | **Savings Plans** | Compute commitment | Up to 65% |
 | **Graviton nodes** | ARM-based instances | 20% better price/performance |
+| **Choose Valkey over Redis OSS** | Valkey pricing is lower than other supported engines for equivalent nodes/Serverless | Lower per-node and Serverless cost |
 | **Reduce replicas** | Minimum needed for HA | Per-node cost |
 | **Tuning hit rate** | Higher hit rate = fewer source queries | Indirect DB cost savings |
 | **Sharding** | Add/remove shards to distribute load | Growing datasets |
+| **ElastiCache Serverless** | Pay only for consumed cache/ECPUs | Avoids over-provisioning for spiky/unknown workloads |
 
 ---
 
@@ -310,3 +319,12 @@ graph TB
 | CloudWatch | Metrics, alarms | Monitoring |
 | Systems Manager | Parameter Store for config | Centralized configuration |
 | Secrets Manager | Auth token management | Secure credential storage |
+
+---
+
+## Global Datastore & Serverless
+
+| Feature | Description |
+|---------|-------------|
+| **Global Datastore** | Cross-region replication for Valkey/Redis OSS clusters; near-real-time, asynchronous replication for disaster recovery and low-latency global reads |
+| **ElastiCache Serverless** | On-demand capacity (compute + memory) that scales automatically per workload; supports Valkey, Redis OSS, and Memcached; no node/shard sizing required |

@@ -11,7 +11,7 @@
 | **Authorizers** | Custom, IAM, Lambda, JWT | JWT, Lambda, IAM | Lambda |
 | **Request validation** | Yes | Yes (model validation) | No |
 | **Content handling** | Yes | No | No |
-| **Usage plans** | Yes | Yes | No |
+| **Usage plans** | Yes | No (use route-level throttling instead) | No |
 | **Stage variables** | Yes | Yes | No |
 | **Canary deployments** | Yes | No | No |
 | **Best for** | Complex APIs, enterprise | Simple APIs, cost-sensitive | Real-time, bidirectional |
@@ -61,7 +61,7 @@ flowchart TD
 | **Usage plan** | Per-API key limits | Client-level throttling |
 | **Stage-level** | Stage-wide limits | Overall capacity management |
 
-### Usage Plans
+### Usage Plans (REST API only)
 
 | Feature | Description | Use Case |
 |---------|-------------|----------|
@@ -70,6 +70,8 @@ flowchart TD
 | **Burst limit** | Short-term spike allowance | Handle traffic spikes |
 | **Quota** | Requests per time period | Tiered pricing |
 | **Throttle** | Per-client limits | Fair usage |
+
+> **Note:** Usage plans and API keys are a REST API feature. HTTP APIs do not support usage plans/API keys natively; use per-route throttling or a custom authorizer for client identification and rate control.
 
 ### Throttling Error Response
 

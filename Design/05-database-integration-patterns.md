@@ -57,7 +57,7 @@ graph TB
 | **Enable DynamoDB Streams** | For event-driven downstream processing |
 | **Use PartiQL** | SQL-like queries without schema changes |
 | **Set TTL** | Automatic expiration for temporary data |
-| **Use TransactWriteItems** | Multi-item atomic writes (max 10 items) |
+| **Use TransactWriteItems** | Multi-item atomic writes (up to 100 actions, raised from 25 in Sep 2022; aggregate item size ≤ 4 MB) |
 | **Batch Write** | BatchWriteItems for bulk operations (25 items/batch) |
 | **Use DAX** | For read-heavy workloads (10x read performance) |
 
@@ -448,7 +448,7 @@ def lambda_handler(event, context):
         event_data = record['dynamodb']['NewImage']['event_data']['S']
         
         try:
-            sqs.send_queue_message(
+            sqs.send_message(
                 QueueUrl=os.environ['QUEUE_URL'],
                 MessageBody=event_data
             )

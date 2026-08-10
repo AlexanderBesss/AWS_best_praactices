@@ -26,7 +26,7 @@
 | TCP/UDP traffic | NLB |
 | Lowest latency | NLB |
 | Host/path-based routing | ALB |
-| Static IP address | NLB |
+| Static IP address | NLB (or Global Accelerator in front of ALB) |
 | WebSocket support | ALB |
 | gRPC services | ALB |
 | Network virtual appliances | GWLB |
@@ -106,8 +106,8 @@ flowchart LR
 | **Path** | Dedicated health endpoint | Lightweight, fast check |
 | **Interval** | 30 seconds (default) | Balance detection and load |
 | **Timeout** | 5-10 seconds | Fast failure detection |
-| **Healthy threshold** | 3 (default) | Confirm health |
-| **Unhealthy threshold** | 3-5 | Confirm failure |
+| **Healthy threshold** | 5 (ALB default), 3 (NLB/GWLB default) | Confirm health |
+| **Unhealthy threshold** | 2 (ALB default), 3 (NLB/GWLB default) | Confirm failure |
 | **Success codes** | 200, 204, or custom | Match application responses |
 
 ### Health Check Best Practices
@@ -233,13 +233,19 @@ flowchart LR
 
 ### LCU (Load Balancer Capacity Units)
 
-| Component | LCU Calculation | Description |
-|-----------|----------------|-------------|
-| **New connections** | Per 350 new connections/sec (ALB/NLB) | Connection establishment |
-| **Active connections** | Per 10,000 active connections | Maintained connections |
-| **Rule evaluations** | Per 2,000 rule evaluations/sec | Routing rules processed |
-| **Data processed** | Per 1 GB of data processed | Traffic volume |
-| **NAT** | Per 5 NAT connections/sec (NLB only) | Network address translation |
+You are billed for whichever dimension has the highest usage in a given hour, not the sum. ALB and NLB measure different dimensions:
+
+| Load Balancer | Dimension | Approx. per-LCU allowance |
+|----------------|-----------|---------------------------|
+| **ALB (LCU)** | New connections | ~25/sec |
+| **ALB (LCU)** | Active connections | ~3,000/min |
+| **ALB (LCU)** | Rule evaluations | ~1,000/sec (first 10 rules free) |
+| **ALB (LCU)** | Processed bytes | ~1 GB/hour |
+| **NLB (NLCU)** | New connections/flows | ~800/sec (TCP; varies by protocol) |
+| **NLB (NLCU)** | Active connections/flows | ~100,000/min |
+| **NLB (NLCU)** | Processed bytes | ~1 GB/hour |
+
+GWLB pricing uses a separate Gateway Load Balancer Capacity Unit (GLCU) model, primarily driven by processed bytes.
 
 ---
 
@@ -265,3 +271,4 @@ flowchart LR
 | Shield | DDoS protection | Advanced DDoS mitigation |
 | VPC | Subnet placement | Network isolation |
 | CloudTrail | API activity logging | Audit trail |
+| Global Accelerator | Static anycast IPs, cross-region failover | Static entry point in front of ALB/NLB |

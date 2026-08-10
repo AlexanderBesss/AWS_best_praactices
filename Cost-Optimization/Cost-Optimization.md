@@ -22,6 +22,16 @@ xychart-beta
     line [100, 80, 60, 40, 20]
 ```
 
+### Graviton (ARM-Based) Instances
+
+| Aspect | Detail |
+|--------|--------|
+| **Price-performance gain** | Up to 40% better price-performance vs. comparable current-gen x86 instances |
+| **Direct cost savings** | ~20% lower on-demand price for equivalent instance size (e.g., c6g vs c5) |
+| **Supported services** | EC2, RDS, ElastiCache, OpenSearch Service, EMR, Lambda (arm64) |
+| **Stacks with** | Savings Plans, Reserved Instances, and Spot for compounded savings |
+| **Migration effort** | Low for interpreted/managed runtimes (Lambda, Java, Python, Node.js); recompilation needed for native binaries |
+
 ### Storage Pricing
 
 | Service | On-Demand | Reserved/Savings | Spot |
@@ -30,7 +40,7 @@ xychart-beta
 | EBS io2 | $0.125/GB/mo | $0.125/GB/mo | N/A |
 | S3 Standard | $0.023/GB/mo | N/A | N/A |
 | S3 IA | $0.0125/GB/mo | N/A | N/A |
-| S3 Glacier Flexible | $0.0035/GB/mo | N/A | N/A |
+| S3 Glacier Flexible | $0.0036/GB/mo | N/A | N/A |
 | EFS Standard | $0.30/GB/mo | N/A | N/A |
 | EFS One Zone | $0.10/GB/mo | N/A | N/A |
 
@@ -141,7 +151,7 @@ flowchart TD
 | **S3 Standard-IA** | Infrequent access | $0.0125/GB/mo | Milliseconds |
 | **S3 One Zone-IA** | Infrequent, non-critical | $0.01/GB/mo | Milliseconds |
 | **S3 Glacier Instant** | Archive, instant access | $0.004/GB/mo | Milliseconds |
-| **S3 Glacier Flexible** | Archive, hours access | $0.0035/GB/mo | Hours |
+| **S3 Glacier Flexible** | Archive, hours access | $0.0036/GB/mo | Hours |
 | **S3 Glacier Deep** | Archive, days access | $0.00099/GB/mo | 12 hours |
 
 ### EBS Optimization

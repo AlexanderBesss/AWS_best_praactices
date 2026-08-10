@@ -140,11 +140,11 @@ flowchart LR
 
 ### Request Rate Limits
 
-| Operation | Default Rate | Notes |
-|-----------|-------------|-------|
-| PUT/COPY/POST/DELETE | 3,500/sec (5,500/sec burst) | Prefix-based partitioning |
-| GET/HEAD | 5,500/sec (10,000/sec burst) | Higher for reads |
-| **Optimization** | Use random prefixes (e.g., UUID, hash) | Distributes across partitions |
+| Operation | Baseline Rate (per prefix) | Notes |
+|-----------|---------------------------|-------|
+| PUT/COPY/POST/DELETE | 3,500/sec | Automatically scales higher; add prefixes to parallelize further |
+| GET/HEAD | 5,500/sec | Automatically scales higher; add prefixes to parallelize further |
+| **Optimization** | Use multiple prefixes to parallelize | S3 auto-partitions by prefix (since 2018); random hashed prefixes are no longer required for performance, only for spreading load across many prefixes |
 
 ---
 
@@ -235,7 +235,7 @@ flowchart LR
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| **Governance** | Objects can't be deleted by all but some users | Protect against accidental deletion |
+| **Governance** | Objects protected from deletion/overwrite; users with `s3:BypassGovernanceRetention` permission can override | Protect against accidental deletion |
 | **Compliance** | Objects can't be deleted by anyone, including root | Regulatory compliance (SEC, HIPAA) |
 
 ---

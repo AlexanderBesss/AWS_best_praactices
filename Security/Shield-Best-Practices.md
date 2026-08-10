@@ -87,7 +87,7 @@ flowchart TD
 | **ALB** | Yes | Yes |
 | **NLB** | Yes | Yes |
 | **Global Accelerator** | Yes | Yes |
-| **VPC** | No | Yes (VPC-level protection via Shield Advanced) |
+| **VPC** | No | No (not a directly protected resource type; protect via associated EIPs/ALB/NLB) |
 | **AWS WAF** | Yes | Yes |
 | **Route 53** | Yes | Yes |
 
@@ -232,7 +232,7 @@ sequenceDiagram
 | **Route 53** | Health checks + failover |
 | **ALB/NLB** | Shield Advanced association |
 | **Global Accelerator** | Shield Advanced association |
-| **VPC** | Shield Advanced VPC protection |
+| **EC2 instances** | Protect indirectly via associated Elastic IP |
 | **Security groups** | Least privilege rules |
 | **NACLs** | Explicit deny rules |
 

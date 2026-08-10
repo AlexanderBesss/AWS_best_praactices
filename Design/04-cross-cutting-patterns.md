@@ -330,7 +330,7 @@ graph TB
 | `OrderCancelled` | Update aggregate | Dashboard, Analytics | Dashboard, Analytics |
 | `PaymentReceived` | Update aggregate | Dashboard | Dashboard view |
 
-Note: EventBridge has a 5 MB event size limit and 500 events/sec per rule (before scaling). Consider these limits for high-throughput CQRS.
+Note: EventBridge events are limited to 1 MB (raised from 256 KB in Jan 2026); `PutEvents` requests can batch up to 10 entries but the total request must stay under 1 MB. Consider this limit for high-throughput CQRS with large event payloads.
 
 ### When NOT to Use
 
@@ -460,7 +460,7 @@ graph TB
     end
     
     subgraph "eu-west-1"
-        A2[API Gateway] --> B2[API Gateway]
+        A2[Client/Route53] --> B2[API Gateway]
         B2 --> C2[Lambda]
         C2 --> D2[(DynamoDB Global Table)]
         C2 --> E2[SQS Queue]
@@ -468,7 +468,7 @@ graph TB
     end
     
     subgraph "ap-southeast-1"
-        A3[API Gateway] --> B3[API Gateway]
+        A3[Client/Route53] --> B3[API Gateway]
         B3 --> C3[Lambda]
         C3 --> D3[(DynamoDB Global Table)]
         C3 --> E3[SQS Queue]

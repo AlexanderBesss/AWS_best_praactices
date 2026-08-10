@@ -13,11 +13,16 @@
 
 ### Metric Resolution
 
-| Resolution | Granularity | Retention | Cost |
-|------------|-------------|-----------|------|
-| Standard | 5 minutes | 15 months | Included |
-| Detailed | 1 minute | 3 months | Extra (EC2) |
-| High-resolution | 1 second | 3 months | Extra |
+CloudWatch retains all metric data, but the queryable *resolution* degrades over time as data ages (it is aggregated to coarser periods, not deleted):
+
+| Data point period | Available at that resolution for | Cost |
+|--------------------|-----------------------------------|------|
+| < 60 seconds (high-resolution) | 3 hours | Extra |
+| 60 seconds (1 minute / "Detailed") | 15 days | Extra (EC2 Detailed Monitoring) |
+| 300 seconds (5 minutes / standard) | 63 days | Included |
+| 3600 seconds (1 hour) | 15 months | Included |
+
+After each window, data is automatically aggregated to the next coarser period rather than discarded — total retention is 15 months, but only at 1-hour resolution.
 
 ### Key Metrics by Service
 
@@ -66,8 +71,8 @@ flowchart LR
 |----------|-------------|
 | **Hierarchical alarms** | Resource -> Service -> Account levels |
 | **Composite alarms** | Combine multiple conditions | Reduce alert fatigue |
-| **Alarm limits** | Monitor alarm count (100 per metric) | Avoid limits |
-| **Action diversification** | SNS, Lambda, SNS topic, EC2 actions | Flexible response |
+| **Alarm quotas** | Total alarms per account/Region is an adjustable service quota (not a small fixed number); still avoid alarm sprawl for manageability and cost | Avoid limits |
+| **Action diversification** | SNS, Lambda, SSM, EC2 actions | Flexible response |
 | **Annotation** | Document alarm purpose | Operational clarity |
 
 ### Composite Alarms
@@ -115,6 +120,7 @@ flowchart LR
 | **Encryption** | KMS encryption for sensitive logs |
 | **Tiering** | Adaptive or explicit to Cold |
 | **Metric filters** | Extract metrics from log patterns |
+| **Embedded Metric Format (EMF)** | Emit structured JSON logs that CloudWatch auto-extracts as custom metrics (avoids PutMetricData calls/cost) |
 | **Subscription filters** | Stream logs to Lambda, Kinesis |
 | **Cross-account** | Centralized log aggregation |
 
@@ -122,7 +128,7 @@ flowchart LR
 
 | Feature | Description | Use Case |
 |---------|-------------|----------|
-| **Query language** | SQL-like log queries | Ad-hoc analysis |
+| **Query language** | Purpose-built Logs Insights QL (also supports OpenSearch PPL and standard SQL syntax) | Ad-hoc analysis |
 | **Saved queries** | Reusable query templates | Regular analysis |
 | **Dashboards** | Log-based visualizations | Monitoring |
 | **Live tail** | Real-time log streaming | Debugging |

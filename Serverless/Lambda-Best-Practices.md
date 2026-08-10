@@ -6,11 +6,13 @@
 
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
-| **Timeout** | Minimum needed (start at 3s) | Reduces cost, faster failure feedback |
-| **Memory** | Right-size based on CPU needs | Memory and CPU scale together |
+| **Timeout** | Minimum needed (start at 3s); max 15 minutes | Reduces cost, faster failure feedback |
+| **Memory** | Right-size based on CPU needs; 128 MB-10,240 MB | Memory and CPU scale together |
+| **Ephemeral storage (/tmp)** | Right-size based on need; 512 MB default, up to 10,240 MB | Storage cost scales with size beyond free 512 MB |
 | **Concurrency** | Set reserved concurrency | Prevent resource contention |
 | **Provisioned Concurrency** | For low-latency requirements | Eliminates cold starts |
-| **Architecture** | arm64 (Graviton) when possible | 20% better price/performance |
+| **SnapStart** | Enable for Java (Corretto), Python, and .NET cold-start-sensitive functions | Restores from a pre-initialized snapshot instead of a full cold init; free for Java, small restore charge for Python/.NET; not compatible with Provisioned Concurrency, EFS, or ephemeral storage > 512 MB |
+| **Architecture** | arm64 (Graviton) when possible | Better price/performance |
 | **Runtime** | Latest supported version | Security patches, performance |
 
 ### Memory vs Performance
@@ -44,6 +46,7 @@
 | Strategy | Effectiveness | Cost Impact | Use Case |
 |----------|--------------|-------------|----------|
 | **Provisioned Concurrency** | Eliminates cold starts | Higher cost | Latency-critical paths |
+| **SnapStart** | Reduces cold start via snapshot restore (no provisioned instances kept warm) | Free for Java; small snapshot-restore charge for Python/.NET | Java, Python, .NET functions with slow init |
 | **Increase memory** | Faster initialization | Higher per-invocation cost | Moderate traffic |
 | **Smaller packages** | Faster deployment | No extra cost | All functions |
 | **VPC endpoints** | Faster VPC connectivity | Endpoint cost | VPC-attached functions |
@@ -83,7 +86,7 @@ flowchart TD
 | **SNS** | Configurable (1-5 hours) | Retry policy |
 | **DynamoDB Streams** | Up to 7 days, exponential backoff | Bisect batch on error |
 | **Kinesis** | Up to 7 days, exponential backoff | Bisect batch on error |
-| **EventBridge** | Up to 180 days | Retry policy (configurable per target) |
+| **EventBridge** | Up to 24 hours / 185 attempts | Retry policy (configurable per target) |
 | **API Gateway** | No automatic retry | Application-level retry |
 
 ### Error Handling Patterns

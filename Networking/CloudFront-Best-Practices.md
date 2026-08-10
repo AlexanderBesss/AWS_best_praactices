@@ -9,6 +9,7 @@
 | **S3 Bucket** | Static content hosting | Websites, assets |
 | **Custom Origin** | Any HTTP/HTTPS endpoint | Application servers |
 | **Load Balancer** | ALB/NLB as origin | Dynamic content, apps |
+| **VPC Origins** | Private ALB/NLB/EC2 in a VPC, reached via AWS-managed private tunnel | Serve private-subnet origins without exposing them publicly |
 | **CloudFront Origin Access** | OAC/OAI for S3 | Secure S3 access |
 | **MediaStore** | Media content | Video, images |
 | **Lambda@Edge** | Edge computation | Dynamic content |
@@ -239,10 +240,10 @@ graph LR
 
 | Feature | Description |
 |---------|-------------|
-| **CloudWatch Logs** | Near real-time logging |
-| **S3 logs** | Standard access logs |
-| **Fields** | Customizable log fields |
-| **Cost** | Additional cost for real-time |
+| **Kinesis Data Streams** | Real-time logs are delivered to a Kinesis data stream within seconds (not directly to CloudWatch Logs); fan out from there to S3/OpenSearch/Lambda via Kinesis Data Firehose |
+| **S3 logs** | Standard (non-real-time) access logs delivered to S3 |
+| **Fields** | Customizable log fields, with a configurable sampling rate |
+| **Cost** | Additional cost for real-time (Kinesis) delivery |
 
 ---
 

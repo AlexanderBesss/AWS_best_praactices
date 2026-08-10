@@ -6,9 +6,9 @@
 
 | Stage | Action | Description |
 |-------|--------|-------------|
-| **Source** | CodeCommit, CodeStar Connections, S3, GitHub | Code repository connection |
+| **Source** | CodeCommit, CodeConnections (formerly CodeStar Connections), S3, GitHub | Code repository connection |
 | **Build** | CodeBuild | Compile, test, package |
-| **Test** | CodeBuild, AWS Device Farm (deprecated, use third-party) | Automated testing |
+| **Test** | CodeBuild, AWS Device Farm, third-party tools | Automated testing |
 | **Deploy** | CodeDeploy, ECS, Lambda, S3 | Application deployment |
 | **Approve** | Manual approval | Human gate before production |
 
@@ -120,6 +120,16 @@ graph TB
         C3 -->|No| C7
     end
 ```
+
+### GitOps Deployments
+
+| Tool | Target | Description |
+|------|--------|-------------|
+| **Argo CD** | EKS | Declarative, Git-sourced continuous delivery for Kubernetes |
+| **Flux** | EKS | GitOps toolkit reconciling cluster state from Git |
+| **CodePipeline + CodeDeploy** | ECS, Lambda, EC2 | AWS-native push-based CD (non-GitOps) |
+
+Use GitOps for Kubernetes workloads where the Git repository is the single source of truth and an in-cluster controller reconciles drift; use CodePipeline/CodeDeploy for AWS-native push-based deployments to ECS, Lambda, or EC2.
 
 ---
 

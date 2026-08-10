@@ -100,7 +100,7 @@ flowchart LR
 | **Rule name** | Descriptive, prefixed by domain | Easy identification |
 | **Event pattern** | Specific enough to avoid noise | Reduce unnecessary processing |
 | **Schedule** | Cron or rate for periodic events | Scheduled tasks |
-| **Target retry** | Default 180 days | Long retry window |
+| **Target retry** | Default 24 hours / up to 185 attempts (configurable, max 24 hours) | Retry window |
 | **Dead-letter queue** | Always configure | Capture permanent failures |
 | **Input transformer** | Transform before target | Reduce target complexity |
 
@@ -133,7 +133,7 @@ flowchart LR
 
 | Setting | Recommendation |
 |---------|---------------|
-| **Retry policy** | Use default (180 days) |
+| **Retry policy** | Use default (24 hours / 185 attempts) or tune MaximumEventAgeInSeconds and MaximumRetryAttempts |
 | **Dead-letter queue** | Always configure SQS DLQ |
 | **Input path** | Transform event before sending |
 | **Input transformer** | Extract specific fields |
@@ -147,12 +147,12 @@ flowchart LR
 
 | Target | Retry Duration | Backoff | Notes |
 |--------|---------------|---------|-------|
-| Lambda | 180 days | Exponential | Configurable DLQ |
-| SQS | 180 days | Exponential | Queue handles retries |
-| SNS | 180 days | Exponential | Subscribers handle retries |
-| Step Functions | 180 days | Exponential | Execution handles retries |
-| Kinesis | 180 days | Exponential | Stream handles retries |
-> **Note:** 180-day retry is default; can be disabled per target. |
+| Lambda | Up to 24 hours / 185 attempts | Exponential | Configurable DLQ |
+| SQS | Up to 24 hours / 185 attempts | Exponential | Queue handles retries |
+| SNS | Up to 24 hours / 185 attempts | Exponential | Subscribers handle retries |
+| Step Functions | Up to 24 hours / 185 attempts | Exponential | Execution handles retries |
+| Kinesis | Up to 24 hours / 185 attempts | Exponential | Stream handles retries |
+> **Note:** 24 hours / 185 attempts is the maximum configurable retry policy on a rule target (default matches the maximum); can be reduced per target. |
 
 ### Dead-Letter Queue
 
@@ -178,39 +178,63 @@ flowchart LR
 
 ---
 
-## Pipelines
+## Pipes
 
-### EventBridge Pipelines
+### EventBridge Pipes
+
+EventBridge Pipes is a point-to-point integration service for connecting a single source (SQS, Kinesis, DynamoDB Streams, MSK, Amazon MQ) to a single target, with optional filtering, enrichment, and transformation in between. It is distinct from event bus rules, which fan out matched events to multiple targets.
 
 | Component | Description |
 |-----------|-------------|
-| **Source** | Event source (EventBus, S3, etc.) |
-| **Processor** | Transform/enrich (Lambda) |
-| **Enrichment** | Add data (Lambda) |
-| **Destination** | Target service |
+| **Source** | Poller-based source (SQS, Kinesis, DynamoDB Streams, MSK, Amazon MQ) |
+| **Filtering** | Drop events before processing (no cost for filtered-out events) |
+| **Enrichment** | Add data (Lambda, Step Functions, API Destinations, API Gateway) |
+| **Target** | Any EventBridge-supported target |
 | **Parameters** | Configuration |
 
 ```mermaid
 flowchart LR
-    A[Source] --> B[Event Bus]
-    B --> C[Processor\nLambda transform]
-    C --> D[Enrichment\nLambda add context]
-    D --> E{Destination}
-    E --> F1[Lambda]
-    E --> F2[SQS]
-    E --> F3[SNS]
-    E --> F4[Step Functions]
-    E --> F5[Kinesis]
+    A[Source\nSQS/Kinesis/DynamoDB Streams] --> B[Filter]
+    B --> C[Enrichment\nLambda/Step Functions/API Destination]
+    C --> D[Target]
+    D --> F1[Lambda]
+    D --> F2[SQS]
+    D --> F3[SNS]
+    D --> F4[Step Functions]
+    D --> F5[Kinesis]
 ```
 
-### Pipeline Use Cases
+### Pipes Use Cases
 
 | Use Case | Components | Description |
 |----------|-----------|-------------|
-| **Data enrichment** | Source + Enrichment + Destination | Add context to events |
-| **Format transformation** | Source + Processor + Destination | Convert event format |
-| **Filtering** | Source + Processor + Destination | Filter events before target |
-| **Multi-destination** | Source + Processor + Multiple destinations | Fan-out with transformation |
+| **Data enrichment** | Source + Enrichment + Target | Add context to events |
+| **Format transformation** | Source + Filter + Target | Convert event format |
+| **Filtering** | Source + Filter + Target | Filter events before target |
+| **Point-to-point streaming** | Source + Target | Move stream records to a target without writing custom polling code |
+
+---
+
+## Scheduler
+
+### EventBridge Scheduler
+
+EventBridge Scheduler is a dedicated scheduling service, separate from schedule-based rules on an event bus. Prefer it over scheduled rules for most new scheduling needs.
+
+| Feature | Description |
+|---------|-------------|
+| **Scale** | Supports far more schedules per account/Region than the ~300 rule limit per event bus |
+| **One-time schedules** | Native support, with automatic cleanup after invocation (`ActionAfterCompletion`) |
+| **Recurring schedules** | Cron or rate expressions, with time zone and daylight-saving support |
+| **Targets** | 270+ AWS API actions via universal targets, in addition to common targets (Lambda, SQS, Step Functions) |
+| **Flexible time windows** | Spread invocations over a window to smooth load |
+| **Retry/DLQ** | Configurable retry policy and dead-letter queue per schedule |
+
+| When to Use | Recommendation |
+|-------------|---------------|
+| **High volume of schedules** | EventBridge Scheduler (avoids per-bus rule limits) |
+| **One-time future task** | EventBridge Scheduler |
+| **Simple periodic rule tied to existing bus rules** | Scheduled (cron/rate) rule on event bus |
 
 ---
 
@@ -258,6 +282,8 @@ flowchart LR
 | **Archive storage** | $0.50 per GB-month |
 | **Replay** | $1.00 per 1M events |
 | **Schema registry** | $1.00 per 1M API calls |
+| **Pipes** | $0.40 per 1M events processed (cheaper than event bus for point-to-point) |
+| **Scheduler** | $1.00 per 1M invocations (first 14M/month free) |
 
 ---
 

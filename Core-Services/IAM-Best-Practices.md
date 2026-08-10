@@ -43,7 +43,7 @@ graph LR
 
 | Scope | Requirement | Implementation |
 |-------|-------------|----------------|
-| **Root Account** | **Mandatory** | Enable hardware or virtual MFA |
+| **Root Account** | **Mandatory** | Enable hardware or virtual MFA; AWS now requires MFA on root users (management accounts first, extended to member accounts) |
 | **IAM Users** | **Mandatory** | Require MFA for console access |
 | **Privileged Roles** | **Mandatory** | aws:MultiFactorAuthPresent condition |
 | **CI/CD Roles** | Not required | Machine-to-machine, use IAM roles |
@@ -76,7 +76,7 @@ graph LR
 |-----------|------------|-------------------|----------------|
 | **IAM Role** | 1 hour | 1-12 hours | Shortest duration needed |
 | **Federated Role** | 1 hour | 1-12 hours | Match session needs |
-| **Web Identity Role** | 1 hour | Fixed at 1 hour (cannot be extended) | Use for mobile/web apps |
+| **Web Identity Role** | 1 hour | 1-12 hours (bounded by the role's configured max session duration) | Use for mobile/web apps |
 
 ---
 

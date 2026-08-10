@@ -9,9 +9,17 @@
 | General Purpose | `m` | Balanced compute, memory, and networking | `m6i.large`, `m7g.xlarge` |
 | Compute Optimized | `c` | High-performance processors for compute-intensive workloads | `c6i.xlarge`, `c7g.2xlarge` |
 | Memory Optimized | `r` | In-memory databases, real-time analytics | `r6i.xlarge`, `r7g.4xlarge` |
-| Storage Optimized | `i`, `d` | Parallel file systems, data warehousing | `i3en.xlarge`, `dl2q.24xlarge` |
-| Accelerated Computing | `p`, `g`, `inf` | GPU/Inference workloads, ML training | `p4d.24xlarge`, `inf2.24xlarge` |
+| Storage Optimized | `i`, `d` | Parallel file systems, data warehousing | `i4i.xlarge`, `d3en.12xlarge` |
+| Accelerated Computing | `p`, `g`, `inf`, `trn` | GPU/Inference/Training workloads, ML | `p4d.24xlarge`, `inf2.24xlarge`, `trn1.32xlarge` |
 | Burstable Performance | `t` | Variable workloads with baseline + burst capability | `t4g.micro`, `t3.medium` |
+
+### Graviton and Nitro
+
+| Topic | Guidance |
+|-------|----------|
+| **AWS Graviton (arm64)** | Prefer Graviton-based instances (e.g., `m7g`, `c7g`, `r7g`, `t4g`) for supported workloads — typically better price-performance than equivalent `x86` instances; requires arm64-compatible AMIs/binaries |
+| **AWS Nitro System** | Virtually all current-generation instances run on the Nitro hypervisor, providing dedicated Nitro Cards for networking/storage/security, minimal virtualization overhead, and hardware-enforced isolation |
+| **Nitro Enclaves** | Use for isolated, attestable compute environments to process highly sensitive data (e.g., PII, keys) |
 
 ### Right-Sizing Guidelines
 
@@ -30,10 +38,10 @@
 | Option | Commitment | Discount | Flexibility | Best For |
 |--------|-----------|----------|-------------|----------|
 | **On-Demand** | None | 0% | Full — stop, terminate, change anytime | Short-term, unpredictable workloads |
-| **Savings Plans (Compute)** | 1 or 3 years | Up to 72% | Medium — instance family flexible | Steady-state, predictable usage |
-| **Savings Plans (EC2 Instance)** | 1 or 3 years | Up to 66% | Low — specific instance family/region | Predictable, specific instance needs |
+| **Savings Plans (Compute)** | 1 or 3 years | Up to 66% | High — instance family, region, OS, tenancy flexible; covers EC2, Fargate, Lambda | Steady-state, predictable usage |
+| **Savings Plans (EC2 Instance)** | 1 or 3 years | Up to 72% | Low — specific instance family/region | Predictable, specific instance needs |
 | **Reserved Instances (Standard)** | 1 or 3 years | Up to 72% | Low — specific instance type/region/tenancy | Long-running, fixed instance types |
-| **Reserved Instances (Convertible)** | 1 or 3 years | Up to 62% | Medium — modify instance attributes | Long-term with potential changes |
+| **Reserved Instances (Convertible)** | 1 or 3 years | Up to 66% | Medium — modify instance attributes | Long-term with potential changes |
 | **Spot Instances** | None | Up to 90% | Low — can be interrupted | Fault-tolerant, flexible timing |
 
 ### Purchasing Decision Matrix
@@ -110,8 +118,8 @@ flowchart TD
 | Volume Type | Code | IOPS | Throughput | Use Case |
 |-------------|------|------|------------|----------|
 | **gp3** | `gp3` | Up to 16,000 (independent) | Up to 1,000 MB/s | General purpose, default choice |
-| **gp2** | `gp2` | Up to 16,000 (size-dependent) | Up to 350 MB/s | Legacy, migrate to gp3 |
-| **io2 Block Express** | `io2` | Up to 256,000 | Up to 4,750 MB/s | Mission-critical, low-latency |
+| **gp2** | `gp2` | Up to 16,000 (size-dependent) | Up to 250 MB/s | Legacy, migrate to gp3 |
+| **io2 Block Express** | `io2` | Up to 256,000 | Up to 4,000 MB/s | Mission-critical, low-latency |
 | **io2** | `io2` | Up to 64,000 | Up to 1,000 MB/s | Critical databases |
 | **st1** | `st1` | Up to 500 | Up to 500 MB/s | Throughput-optimized, big data |
 | **sc1** | `sc1` | Up to 125 | Up to 500 MB/s | Cold, infrequently accessed data |

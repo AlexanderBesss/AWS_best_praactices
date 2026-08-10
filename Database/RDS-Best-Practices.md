@@ -19,8 +19,8 @@
 |---------|-------------|-------------------|---------|
 | **Storage** | Auto-scaling up to 128 TB | Auto-scaling up to 128 TB | No provisioning needed |
 | **Replication** | 6x async, no I/O impact | Synchronous within cluster | High durability |
-| **Read Replicas** | Up to 15 | Up to 16 | Read scaling |
-| **Multi-Master** | Yes (Aurora MySQL) | No (PostgreSQL uses standard read replicas) | Active-active writes (MySQL only) |
+| **Read Replicas** | Up to 15 Aurora Replicas | Up to 15 Aurora Replicas | Read scaling |
+| **Multi-Master** | Deprecated (not available for new clusters) | No | Legacy active-active option; use Aurora Global Database or standard replicas instead |
 | **Serverless v2** | Yes | Yes | Auto-scaling compute |
 | **Global Database** | Yes | Yes | Cross-region replication |
 
@@ -79,13 +79,13 @@
 
 ### Multi-AZ Deployments
 
-| Feature | Single-AZ | Multi-AZ | Multi-AZ Primary |
+| Feature | Single-AZ | Multi-AZ DB Instance (one standby) | Multi-AZ DB Cluster (two readable standbys) |
 |---------|-----------|----------|-----------------|
-| **Standby** | None | Full synchronous standby | Primary in another AZ |
-| **Failover Time** | N/A | 60-120 seconds | 30-60 seconds |
-| **Read Traffic** | Primary only | Standby not for reads | Standby can serve reads |
-| **Cost** | Base | 2x base | 2x base |
-| **Use Case** | Dev/test | Production | Critical production |
+| **Standby** | None | One synchronous standby (not readable) | Two readable standby instances in separate AZs |
+| **Failover Time** | N/A | Typically 60-120 seconds | Typically under 35 seconds |
+| **Read Traffic** | Primary only | Standby not for reads | Both standbys can serve reads |
+| **Cost** | Base | ~2x base | ~3x base |
+| **Use Case** | Dev/test | Production | Critical production, read scaling + fast failover |
 
 ```mermaid
 graph LR
@@ -173,7 +173,7 @@ graph LR
 |-----------|-------------|--------|
 | **Proper indexing** | Cover query patterns with indexes | 10-1000x improvement |
 | **Query plans** | Use EXPLAIN to analyze execution | Identify full table scans |
-| **Connection pooling** | Proxy or application-level pooling | Reduce connection overhead |
+| **Connection pooling** | RDS Proxy (managed) or application-level pooling | Reduce connection overhead, faster failover for apps |
 | **Query caching** | Application-level result caching | Reduce repeated queries |
 | **Partitioning** | Split large tables by range/hash | Improve query performance |
 

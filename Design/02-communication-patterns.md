@@ -11,14 +11,14 @@ Serverless communication patterns define how Lambda functions, APIs, and event s
 | Mechanism | Type | Latency | Cost (US East) | Max Payload | Best For |
 |-----------|------|---------|----------------|-------------|----------|
 | **Synchronous Invoke** | Direct | 10-100ms | $0.20/M invocations | 6 MB | Request-response, real-time |
-| **Async Invoke** | Queued | 100ms-1s | $0.20/M invocations | 128 KB | Fire-and-forget |
+| **Async Invoke** | Queued | 100ms-1s | $0.20/M invocations | 1 MB (raised from 256 KB, Oct 2025) | Fire-and-forget |
 | **API Gateway REST + Lambda** | HTTP | 50-200ms | $3.50/M calls + Lambda | 10 MB req / 6 MB resp | REST APIs |
 | **API Gateway HTTP + Lambda** | HTTP | 30-150ms | $0.35/M calls + Lambda | 10 MB req / 10 MB resp | Lightweight REST APIs |
 | **Lambda Function URL** | HTTP | 20-100ms | $0.45/M calls + Lambda | 10 MB | Direct Lambda HTTP |
 | **AppSync + Lambda** | GraphQL | 50-200ms | $2.50/M calls + Lambda | 1 MB | GraphQL APIs |
 | **SNS → Lambda** | Push | 100ms-1s | $0.60/M + Lambda | 256 KB | Fan-out, notifications |
-| **SQS → Lambda** | Pull | 1s-60s | $0.40/M + Lambda | 256 KB | Async processing |
-| **EventBridge → Lambda** | Push | 100ms-1s | $1.00/M events | 256 KB | Event routing |
+| **SQS → Lambda** | Pull | 1s-60s | $0.40/M + Lambda | 1 MiB (raised from 256 KB, Aug 2025) | Async processing |
+| **EventBridge → Lambda** | Push | 100ms-1s | $1.00/M events | 1 MB (raised from 256 KB, Jan 2026) | Event routing |
 | **Step Functions Standard** | Orchestration | 1s+ | $25/M transitions | 256 KB | Long workflows, human tasks |
 | **Step Functions Express** | Orchestration | <1s | $0.25/M executions | 256 KB | Event processing, fast workflows |
 | **Lambda-to-Lambda (SDK)** | Direct | 10-50ms | $0.20/M invocations | 6 MB | Service-to-service |

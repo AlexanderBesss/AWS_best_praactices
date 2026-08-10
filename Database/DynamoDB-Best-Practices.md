@@ -61,7 +61,7 @@ graph TB
 
 | Feature | On-Demand | Provisioned |
 |---------|-----------|-------------|
-| **Pricing** | Per-request ($0.00065/100 RCU, $0.00065/100 WCU) | Per-hour capacity + overage |
+| **Pricing** | Per-request (~$0.125/million read request units, ~$0.625/million write request units, us-east-1) | Per-hour capacity + overage |
 | **Scaling** | Automatic, unlimited | Manual or auto-scaling |
 | **Burst** | No burst needed | Burst from unused capacity |
 | **Predictability** | Variable cost | Predictable cost |
@@ -87,7 +87,8 @@ graph TB
 
 | Consideration | Recommendation |
 |---------------|----------------|
-| **Number of GSIs** | Start with 2-3, add as needed |
+| **Number of GSIs** | Start with 2-3, add as needed (default quota: 20 per table) |
+| **Number of LSIs** | Max 5 per table, must be defined at table creation |
 | **Sparse indexes** | Only index items that need the query pattern |
 | **Projected attributes** | Use `INCLUDE` or `KEYS_ONLY` to reduce cost |
 | **Partition key** | Different from table PK for different access patterns |
@@ -150,12 +151,14 @@ graph TB
 
 ### DAX Sizing
 
-| Node Type | Memory | Use Case |
-|-----------|--------|----------|
-| **dax.r6g.large** | 5.1 GB | Small workloads |
-| **dax.r6g.xlarge** | 19 GB | Medium workloads |
-| **dax.r6g.2xlarge** | 39 GB | Large workloads |
-| **dax.r6g.4xlarge** | 126 GB | Very large workloads |
+| Node Type | Relative Capacity | Use Case |
+|-----------|--------------------|----------|
+| **dax.r6g.large** | Baseline | Small workloads |
+| **dax.r6g.xlarge** | ~2x large | Medium workloads |
+| **dax.r6g.2xlarge** | ~4x large | Large workloads |
+| **dax.r6g.4xlarge** | ~8x large | Very large workloads |
+
+> Memory per node type scales with the underlying R6g instance size; check current values on the [DynamoDB pricing page](https://aws.amazon.com/dynamodb/pricing) before sizing. A DAX cluster supports 1 primary + up to 10 read replicas (max 11 nodes); use at least 3 nodes across different AZs for production fault tolerance.
 
 ---
 
@@ -223,17 +226,27 @@ graph TB
 | **TTL for expiring data** | Auto-delete old items | Storage reduction |
 | **Projection optimization** | KEYS_ONLY or INCLUDE | GSI storage reduction |
 | **DAX for read-heavy** | Cache frequent reads | Lower RCU consumption |
-| **Archive to S3** | Export cold data via DynamoDB Data Pipeline | Storage cost reduction |
+| **Standard-IA table class** | Use for tables where storage is the dominant cost | Up to ~60% lower storage cost (higher per-request cost) |
+| **Archive to S3** | Export cold/infrequently accessed data (S3 export or on-demand backup export) | Storage cost reduction |
+
+### Table Classes
+
+| Table Class | Storage Cost | Throughput Cost | Best For |
+|-------------|-------------|------------------|----------|
+| **DynamoDB Standard** | Higher | Lower | Default; most workloads |
+| **DynamoDB Standard-IA** | Lower (~60% less) | Higher (~25% more) | Storage-dominant, infrequently accessed tables (logs, historical records) |
 
 ### Cost Components
 
-| Component | On-Demand Cost | Provisioned Cost |
+| Component | On-Demand Cost (us-east-1) | Provisioned Cost |
 |-----------|---------------|-----------------|
-| **Read (per 100 K RCUs)** | $0.065 per 100K consumed | $0.065 per provisioned RCU-hour |
-| **Write (per 100 K WCUs)** | $0.065 per 100K consumed | $0.065 per provisioned WCU-hour |
-| **Storage (per GB/month)** | $0.25 | $0.25 |
-| **GSI storage (per GB/month)** | $0.25 | $0.25 |
-| **Data transfer (per GB)** | $0.09/region | $0.09/region |
+| **Read (per million request units)** | ~$0.125 (eventually consistent) | Billed per provisioned RCU-hour |
+| **Write (per million request units)** | ~$0.625 | Billed per provisioned WCU-hour |
+| **Storage (per GB/month)** | ~$0.25 (Standard table class) | Same |
+| **GSI storage (per GB/month)** | Same as base table storage rate | Same |
+| **Data transfer (per GB)** | Standard AWS data transfer rates apply | Same |
+
+> Pricing varies by region and changes periodically — always confirm current rates on the [DynamoDB pricing page](https://aws.amazon.com/dynamodb/pricing).
 
 ---
 
@@ -241,9 +254,9 @@ graph TB
 
 | Method | RPO | RTO | Cost | Use Case |
 |--------|-----|-----|------|----------|
-| **On-Demand Backup** | Point-in-time | Minutes | Storage only | Manual snapshots |
-| **Continuous Backup** | Up to 35 days | Minutes | Included | Point-in-time recovery (up to 35 days) |
-| **PITR** | 1 second | Minutes | Included | Precise recovery |
+| **On-Demand Backup** | Point-in-time | Minutes | Storage only | Manual snapshots, retained until explicitly deleted |
+| **Continuous Backup** | Configurable, 1-35 days (default 35) | Minutes | Included | Point-in-time recovery window |
+| **PITR** | ~5 minutes before current time | Minutes | Included | Precise recovery to any second within the configured window |
 | **DynamoDB Global Tables** | Near-zero | Seconds | 2x storage + transfer | Multi-region active-active |
 
 ---

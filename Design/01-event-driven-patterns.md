@@ -11,11 +11,11 @@ Event-driven architecture (EDA) is a software design pattern where components co
 | Service | Type | Delivery Guarantee | Ordering | Max Payload | Retention | Use Case |
 |---------|------|-------------------|----------|-------------|-----------|----------|
 | **SNS** | Pub/Sub (push) | At-least-once | None | 256 KB | N/A (push) | Fan-out, notifications, broadcast |
-| **SQS Standard** | Queue (pull) | At-least-once | Best-effort FIFO | 256 KB | 1-14 days | Async processing, decoupling |
-| **SQS FIFO** | Queue (pull) | Exactly-once (with Lambda ESM) | Strict FIFO | 256 KB | 1-14 days | Ordered processing, deduplication |
-| **EventBridge** | Event bus (push) | At-least-once | None | 256 KB | Configurable (archive) | Event routing, service integration |
+| **SQS Standard** | Queue (pull) | At-least-once | Best-effort FIFO | 1 MiB (raised from 256 KB, Aug 2025) | 1-14 days | Async processing, decoupling |
+| **SQS FIFO** | Queue (pull) | Exactly-once (with Lambda ESM) | Strict FIFO | 1 MiB (raised from 256 KB, Aug 2025) | 1-14 days | Ordered processing, deduplication |
+| **EventBridge** | Event bus (push) | At-least-once | None | 1 MB (raised from 256 KB, Jan 2026) | Configurable (archive) | Event routing, service integration |
 | **Kinesis Data Streams** | Stream (pull) | At-least-once | Per shard | 1 MB | 24h-365 days | High-throughput ordered streaming |
-| **Lambda** | Compute (trigger) | At-least-once | Depends on trigger | 6 MB (sync) / 128 KB (async) | N/A | Event processing, transformation |
+| **Lambda** | Compute (trigger) | At-least-once | Depends on trigger | 6 MB (sync) / 1 MB (async, raised from 256 KB, Oct 2025) | N/A | Event processing, transformation |
 
 ---
 
@@ -84,7 +84,7 @@ graph TB
 | `BatchSize` | 1-10 | Messages per Lambda invocation |
 | `MaximumBatchingWindow` | 0-300s | Buffer time for larger batches (longer window = fewer invocations but higher latency) |
 | `MaximumConcurrency` | 1-10000 | Parallel Lambda invocations |
-| `MaximumRetryAttempts` | 0-10000 | Retries before DLQ |
+| Queue `RedrivePolicy.maxReceiveCount` | 1-1000 | Retries before message moves to DLQ (SQS does not support Lambda's `MaximumRetryAttempts` ESM parameter — that applies only to stream sources like Kinesis/DynamoDB Streams) |
 | `FunctionResponseTypes` | `ReportBatchItemFailures` | Partial batch failure reporting |
 
 ### When NOT to Use
@@ -150,7 +150,7 @@ graph LR
 - **Different MessageGroupId** = parallel processing = no ordering guarantee
 - Lambda concurrency is **limited to 1 per MessageGroupId** in FIFO mode
 - Set visibility timeout > Lambda timeout + buffer
-- SQS FIFO queue size limit: 256 GB per queue — relevant for backpressure planning
+- SQS FIFO in-flight message limit: 120,000 messages per queue (raised from 20,000 in Nov 2024) — relevant for backpressure planning
 
 ### When NOT to Use
 
@@ -251,7 +251,7 @@ graph TB
 ### When NOT to Use
 
 - Don't use for requests requiring immediate response — use synchronous invocation
-- Don't use for payloads > 128 KB — use SQS or SNS intermediary
+- Don't use for payloads > 1 MB (current Lambda async invocation limit, raised from 256 KB in Oct 2025) — use SQS or SNS intermediary. Note SNS message size remains capped at 256 KB.
 
 ---
 
