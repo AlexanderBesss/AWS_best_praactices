@@ -279,3 +279,18 @@ flowchart TD
 | **Maximum retry attempts** | 3-5 | Balance retries and DLQ |
 | **Visibility timeout** | 2x function timeout + buffer | Prevent duplicate processing |
 | **DLQ** | Always configure | Capture permanent failures |
+
+---
+
+## Lambda with Step Functions
+
+| Consideration | Recommendation | Reason |
+|---------------|---------------|--------|
+| **When to orchestrate** | Multi-step workflows, branching, human approval, long-running processes (> 15 min) | Lambda alone can't wait beyond its own timeout or resume after a pause |
+| **Integration pattern** | Prefer direct service integrations (e.g., DynamoDB, SNS, SQS) over a Lambda task where no custom logic is needed | Removes cold starts, invocation cost, and an extra failure point |
+| **Payload size** | Keep state passed between steps small (< 256 KB) | Large payloads should go through S3/DynamoDB with a reference passed in state |
+| **Error handling** | Use `Retry`/`Catch` in the state machine instead of custom retry loops inside the function | Centralizes backoff and failure routing, easier to observe per step |
+| **Express vs. Standard workflows** | Express for high-volume, short-duration (< 5 min) Lambda-driven workflows; Standard for long-running, auditable workflows | Express is cheaper per-execution but lacks full execution history |
+| **Idempotency** | Design Lambda tasks to be safely retried by the state machine | Standard workflows retry steps on transient failures |
+
+See [Event-Driven Architecture Patterns](../Design/01-event-driven-patterns.md) for broader workflow orchestration patterns.

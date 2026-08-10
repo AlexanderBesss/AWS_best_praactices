@@ -57,6 +57,12 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+A single SNS topic delivering straight to Lambda subscribers ties every consumer's throughput and failure behavior to the noisiest one — a slow or throttled team's Lambda causes retries against the topic that can affect delivery to unrelated subscribers, and there's no buffer to absorb a burst without over-provisioning Lambda concurrency for every consumer at once. Without a queue in front of each consumer, a producer spike (e.g., a batch upload firing thousands of events in seconds) either gets dropped past SNS's retry policy or forces every downstream Lambda to scale to match the peak, even ones that don't need to.
+
+**Trade-off:** every consumer now needs its own SQS queue and (usually) DLQ to manage, which multiplies the number of resources to monitor, tag, and pay for — polling/delivery costs on N queues add up even when the underlying event volume is modest, and message duplication across the two fan-out layers requires each consumer to be idempotent. For a handful of low-volume subscribers this operational overhead outweighs the isolation benefit.
+
 ### Throughput Calculation
 
 ```
@@ -71,6 +77,8 @@ Total Throughput = Sum of all queue throughputs
 ```
 
 ### Why Double Fan-Out?
+
+Benefits of layering an SQS fan-out under the SNS fan-out instead of going straight to Lambda.
 
 | Benefit | Description |
 |---------|-------------|
@@ -131,7 +139,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+A business transaction that spans multiple services (order, inventory, payment, shipping) has no database-level ACID transaction to fall back on — each service owns its own data store, so a two-phase commit across them isn't available. Without an explicit saga, a failure partway through (e.g., payment declines after inventory is already reserved) leaves the system in an inconsistent state: inventory held with no order to fulfill, or a customer charged with no shipment scheduled. The saga pattern makes that failure handling explicit by defining a compensating action for every forward step, so partial failures unwind deterministically instead of leaking inconsistent state that has to be found and fixed manually.
+
+**Trade-off:** compensations are themselves distributed calls that can fail, so the saga must handle compensation failures too (retry, alert, manual intervention), and the system is only eventually consistent during the saga's execution window — a query mid-saga can see inventory reserved with no confirmed order. Building and testing every compensating action doubles the code paths per step, which is not worth it for transactions that can be scoped to a single service's database transaction instead.
+
 ### Saga Orchestration vs Choreography
+
+How the two saga coordination styles compare across control, visibility, and coupling.
 
 | Aspect | Orchestration | Choreography |
 |--------|--------------|--------------|
@@ -143,6 +159,8 @@ graph TB
 | **AWS Implementation** | Step Functions | SNS + EventBridge |
 
 ### Saga Event Log Design
+
+DynamoDB schema for tracking each saga step, its compensation, and status.
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
@@ -202,7 +220,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+Storing only the current state of an aggregate (the typical CRUD approach) throws away the history of how it got there — there's no way to answer "what was this order's status at 3pm yesterday" or reconstruct intermediate states for a dispute or audit, because each write overwrites the previous value. Event sourcing solves this by making the event log itself the source of truth: state is a derived, rebuildable projection, not the primary record. This also decouples the write model from however many read shapes the business needs (search index, dashboard, analytics) — each projection can be rebuilt independently or added later without migrating historical data, since the events that produced past state are still there.
+
+**Trade-off:** every query now depends on a projection being correct and up to date, and reconstructing state means replaying events (or restoring from a snapshot and replaying the remainder), which adds latency and code complexity that a direct read of a current-state table doesn't have. Schema changes to event payloads are also harder to retrofit than changing a mutable row, since old events in the store must still deserialize correctly. For systems where "what changed and when" isn't a real business requirement, this bookkeeping is pure overhead.
+
 ### Event Store Table Design
+
+DynamoDB schema for the append-only event store backing event sourcing.
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
@@ -214,6 +240,8 @@ graph TB
 | `version` | Number | Optimistic concurrency |
 
 ### Projection Strategies
+
+How to build read-model projections from the event store depending on latency tolerance.
 
 | Strategy | When to Use | Implementation |
 |----------|------------|----------------|
@@ -267,7 +295,15 @@ graph TB
     S4 --> S5
 ```
 
+### Why This Pattern?
+
+Running one stack per customer scales linearly in operational cost — every deployment, patch, and monitoring dashboard has to be replicated per tenant, and idle tenants still pay for provisioned infrastructure. Without a deliberate isolation strategy, teams either default to full per-tenant stacks (unsustainable past a few dozen customers) or default to a shared stack with no tenant boundary at all, where a missing `tenant_id` filter in one query becomes a cross-tenant data leak. This pattern exists to make the isolation boundary — whether it's a partition key, a separate table, or a separate account — an explicit, reviewable part of the design rather than something enforced ad hoc in application code.
+
+**Trade-off:** shared-infrastructure tenancy means a noisy or misbehaving tenant can consume DynamoDB capacity or Lambda concurrency that other tenants depend on unless you add per-tenant throttling or reserved concurrency, and a bug in the shared code path affects every tenant simultaneously instead of one. Moving to stronger isolation (separate tables or accounts) removes that blast radius but reintroduces the per-tenant operational cost this pattern is trying to avoid — the right level is a cost/blast-radius trade rather than a default.
+
 ### Isolation Levels
+
+Multi-tenant isolation tiers, ranging from shared tables to fully separate accounts, with their cost and complexity trade-offs.
 
 | Level | Data | Compute | Cost | Complexity |
 |-------|------|---------|------|-----------|
@@ -277,6 +313,8 @@ graph TB
 | **Fully Isolated** | Separate accounts | Separate accounts | Fully separated | Very High |
 
 ### Tenant Selection Criteria
+
+Factors that push the isolation choice toward shared, semi-isolated, or fully isolated tenancy.
 
 | Factor | Shared | Semi-Isolated | Fully Isolated |
 |--------|--------|--------------|----------------|
@@ -321,7 +359,15 @@ graph TB
     H -->|Process| N[Lambda<br/>Audit Processor]
 ```
 
+### Why This Pattern?
+
+A single data model optimized for writes (normalized, transactional) is usually a poor fit for reads that need full-text search, denormalized dashboards, or analytical aggregation — forcing all of that through one store either means expensive queries against the write model or bolting ad hoc caching/indexing onto it in an unstructured way. CQRS solves this by letting each read need have its own purpose-built store (OpenSearch for search, a denormalized DynamoDB view for dashboards, Redshift for analytics), fed by the same domain events, so query performance for one use case is never constrained by the schema requirements of another.
+
+**Trade-off:** every read model is only as fresh as its projector has processed, so reads are eventually consistent with writes — a user can create an order and not see it in the dashboard view for the duration of the EventBridge rule match and Lambda projection latency. Each additional read model is also another projector to build, monitor, and keep in sync, and a failed or delayed projection silently produces stale results unless you add explicit lag monitoring. For workloads with a single query shape, this is added infrastructure without a corresponding benefit.
+
 ### CQRS Event Flow
+
+How each domain event fans out to projectors and which read models get updated.
 
 | Event | Command Handler | Projectors Triggered | Read Models Updated |
 |-------|----------------|---------------------|-------------------|
@@ -372,7 +418,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+Processing a large file or dataset in a single Lambda invocation is capped by the 15-minute execution limit and by memory — a file with millions of records will time out or OOM before finishing, and a failure at record 900,000 with no checkpoint means restarting from zero. Splitting the work into SQS-buffered batches with a checkpoint table solves both problems: each invocation only has to process one bounded chunk within the time limit, and `ReportBatchItemFailures` plus the checkpoint record let processing resume from the last successful point instead of reprocessing already-completed work or losing track of progress entirely.
+
+**Trade-off:** the checkpoint table itself becomes a piece of state that has to be kept consistent with the actual work done — a checkpoint written before the corresponding record is durably processed (or vice versa) creates gaps or duplicate processing, so writes to the results table and the checkpoint need careful ordering or idempotency keys. This machinery is unnecessary overhead for batches small enough to finish comfortably within a single Lambda invocation's time and memory budget.
+
 ### Checkpoint Table Design
+
+DynamoDB schema for tracking batch progress so failed batches can resume.
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
@@ -422,6 +476,12 @@ graph TB
         F -->|Error| I[Skip Recommendations]
     end
 ```
+
+### Why This Pattern?
+
+A client that needs data from several microservices to render one screen either has to make several round trips itself (adding client-side latency and complexity, especially over mobile networks) or the backend has to expose a purpose-built endpoint that fans out to each service on the client's behalf. Without an aggregator, that fan-out logic ends up duplicated in every client, and there's no single place to enforce per-call timeouts and fallback behavior — a slow recommendations service would otherwise stall or break the entire page instead of just being omitted.
+
+**Trade-off:** the aggregator becomes a single point of failure and a timeout-budget balancing act — its own timeout has to be smaller than the API Gateway limit while still leaving enough time for every downstream call, and adding a new downstream dependency means re-deriving that budget. It also adds a Lambda invocation and network hop that isn't needed when a single service can already provide everything the client needs directly.
 
 ### Aggregation Timeout Budget
 
@@ -487,7 +547,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+Serving a global user base from a single region means every request outside that region pays cross-continent round-trip latency, and a regional outage takes the entire application down with no fallback. DynamoDB Global Tables solves both by replicating data to every region so each user's requests are served locally and a region failure only removes that region's capacity, not the whole system's — but multi-master replication means the same item can be written concurrently in two regions before either write has propagated, and something has to decide which write wins.
+
+**Trade-off:** conflict resolution is last-writer-wins by default, which silently discards one of the concurrent writes rather than merging them — acceptable for data where "most recent update" is the correct semantic, but wrong for cases like decrementing a counter or appending to a list, where a naive overwrite loses an update instead of combining it. Multi-region writes also mean paying for replicated write capacity in every region regardless of where the traffic actually originates, which is wasted spend for an application that only serves a single region's users.
+
 ### Conflict Resolution Strategies
+
+Approaches for resolving concurrent writes to the same item across regions.
 
 | Strategy | Behavior | Use Case |
 |----------|----------|----------|
@@ -508,6 +576,8 @@ Note: DynamoDB Global Tables uses multi-master replication with eventual consist
 
 ### ADR-001: SQS vs EventBridge for Async Processing
 
+Cost, ordering, and feature comparison behind the choice between the two.
+
 | Criteria | SQS | EventBridge |
 |----------|-----|-----------|
 | Cost | $0.40/M messages (US East, approx) | $1.00/M events (US East, approx) |
@@ -519,6 +589,8 @@ Note: DynamoDB Global Tables uses multi-master replication with eventual consist
 
 ### ADR-002: DynamoDB vs Aurora for Lambda Workloads
 
+Cold-start, scaling, and query-complexity trade-offs behind the choice between the two.
+
 | Criteria | DynamoDB | Aurora Serverless |
 |----------|----------|------------------|
 | Cold starts | None (HTTP) | With RDS Proxy: minimal |
@@ -529,6 +601,8 @@ Note: DynamoDB Global Tables uses multi-master replication with eventual consist
 | **Decision** | **DynamoDB for simple, high-scale** | **Aurora for complex queries, schema** |
 
 ### ADR-003: Step Functions vs Lambda Chaining
+
+Cost, duration limits, and error-handling trade-offs behind the choice between the two.
 
 | Criteria | Step Functions | Lambda Chaining |
 |----------|---------------|-----------------|
@@ -542,6 +616,8 @@ Note: DynamoDB Global Tables uses multi-master replication with eventual consist
 ---
 
 ## Anti-Patterns to Avoid
+
+Common cross-cutting design mistakes and the fix for each.
 
 | Anti-Pattern | Problem | Solution |
 |-------------|---------|----------|

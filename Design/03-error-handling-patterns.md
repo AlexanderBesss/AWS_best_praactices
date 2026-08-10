@@ -23,6 +23,8 @@ Building resilient serverless architectures requires defense-in-depth error hand
 
 ## Retry Strategy Matrix
 
+Default and configurable retry behavior for each AWS service that can drive Lambda.
+
 | Service | Retry Mechanism | Default Behavior | Configurable Range |
 |---------|----------------|-----------------|-------------------|
 | **Lambda Async** | Redrive policy | 0 retries, then DLQ | 0-2 retries |
@@ -59,6 +61,12 @@ graph LR
     end
 ```
 
+### Why This Pattern?
+
+A naive retry (same delay every time, no randomization) causes two distinct failures. First, fixed-interval retries synchronize: if a downstream service degrades and drops a batch of requests simultaneously, every caller retries at the same fixed offset, hitting the service with another synchronized spike — a thundering herd that can prevent recovery entirely. Second, retrying without backoff wastes invocation time and money hammering a service that needs time to recover (e.g., a database restarting, a throttled API waking up), extending the outage rather than riding it out.
+
+**Trade-off:** exponential backoff trades latency for resilience — a request that fails and retries 5 times can take 30+ seconds to resolve, which is unacceptable in a synchronous, user-facing call path. It's suited to async and queue-driven workloads (SQS, EventBridge, Step Functions) where the caller isn't blocked waiting; for synchronous APIs, cap retries aggressively or fail fast with a fallback instead.
+
 ### SNS Delivery Policy
 
 ```json
@@ -79,6 +87,8 @@ graph LR
 ```
 
 ### Retry Decision Framework
+
+Whether an error should be retried and with what strategy, by error type.
 
 | Error Type | Retry? | Strategy |
 |-----------|--------|----------|
@@ -125,7 +135,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+A single flat DLQ conflates two very different failure modes: transient issues that will succeed if retried later, and poison messages that will never succeed no matter how many times they're replayed (bad schema, missing referenced record, etc.). Without escalation levels, on-call engineers either have to manually inspect every message to tell them apart, or the queue is bulk-reprocessed and the same poison messages fail again, burning invocations and masking the one message that actually needed a human to look at it.
+
+**Trade-off:** each escalation level is its own queue, its own processor Lambda, and its own alarm — three times the infrastructure of a single DLQ, and delayed visibility into failures (a message doesn't reach human review until L1 and L2 retries are exhausted, which can take hours). For low-volume or non-critical queues, a single DLQ with a CloudWatch alarm is often sufficient and this pattern is overkill.
+
 ### DLQ Monitoring Alarms
+
+Alarm thresholds and the action to take for each layer of the DLQ escalation chain.
 
 | Metric | Threshold | Action |
 |--------|-----------|--------|
@@ -164,7 +182,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+Without a circuit breaker, a Lambda function keeps calling a failing or slow downstream dependency on every invocation, and each call waits out its full connection/read timeout before failing. Under concurrent load this ties up Lambda concurrency, database connections (via RDS Proxy), and thread pools purely waiting on a dependency that isn't going to respond — the caller's own resource exhaustion becomes a second outage on top of the original one, and it propagates upstream to whatever called the caller. Retrying blindly (Pattern 1) makes this worse, not better, when the root cause is a hard outage rather than a transient blip.
+
+**Trade-off:** the circuit breaker adds a layer of state (current state, failure counts, timers) that must be shared correctly across concurrent Lambda invocations — in-memory state doesn't persist between executions, so a real implementation needs an external store (DynamoDB, ElastiCache) or relies on the alpha Powertools decorator's per-invocation behavior, adding latency and a dependency of its own. It also means legitimate requests get rejected during the OPEN window even if the downstream service has already recovered, until the next half-open probe succeeds.
+
 ### Circuit Breaker Configuration
+
+Tunable parameters that control when the circuit opens, closes, and retests the downstream service.
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
@@ -175,6 +201,8 @@ graph TB
 | `failureRate` | 0.5 | 50% failure rate triggers open |
 
 ### AWS Implementation Options
+
+Where to implement circuit breaking depending on the layer and complexity you're willing to take on.
 
 | Approach | Tool | Complexity |
 |----------|------|-----------|
@@ -236,7 +264,15 @@ graph TB
     F -->|Timeout| M[Return 503<br/>Try Again Later]
 ```
 
+### Why This Pattern?
+
+Every AWS delivery mechanism in the Retry Strategy Matrix above — SQS event source mappings, SNS, EventBridge — guarantees at-least-once delivery, not exactly-once. A consumer will occasionally see the same message twice: because the visibility timeout expired before the Lambda finished processing, because the producer retried after a timed-out acknowledgment it never received, or because a Lambda's DLQ redrive replays a message that actually succeeded. Without an idempotency check, "charge the credit card" or "decrement inventory" executes twice for the same logical request, corrupting state in a way that's hard to detect and hard to reverse after the fact.
+
+**Trade-off:** the idempotency table adds a DynamoDB read/write (and its own latency and cost) to every request, plus the conditional-write logic to avoid a race between two concurrent deliveries of the same message. It only guards against duplicate delivery of the same idempotency key — it does nothing for out-of-order processing of related-but-distinct messages, which needs FIFO ordering (see Design/01) instead.
+
 ### Idempotency Table Design
+
+DynamoDB table schema for tracking request state and caching responses.
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
@@ -247,6 +283,8 @@ graph TB
 | `expires_at` | Number | TTL for automatic cleanup |
 
 ### Idempotency Key Sources
+
+Common places to derive an idempotency key from, depending on the trigger.
 
 | Source | Example | Use Case |
 |--------|---------|----------|
@@ -288,7 +326,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+Lambda concurrency is a shared, account-level (and often stack-level) pool. Without reserved concurrency per downstream integration, a burst of traffic to a low-priority path — say, a notification service having a slow day — can consume all available concurrency and throttle invocations for a critical path like payment processing that shares the same unreserved pool, even though the two have nothing to do with each other functionally. This is the serverless equivalent of one noisy tenant taking down every other tenant on a shared thread pool.
+
+**Trade-off:** reserving concurrency for a service is also a hard ceiling on that service — traffic beyond the reserved amount is throttled even if the rest of the account has capacity to spare, so under-provisioning a bulkhead creates the exact throttling problem the pattern is meant to prevent elsewhere. It also reduces the size of the shared unreserved pool available to everything else, so bulkheads have to be sized deliberately, not applied uniformly to every function.
+
 ### Concurrency Allocation Strategy
+
+Reserved concurrency budget per service, prioritized by business criticality.
 
 | Service | Priority | Reserved Concurrency | Rationale |
 |---------|----------|---------------------|-----------|
@@ -332,7 +378,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+Without graceful degradation, a single failed dependency becomes a total outage: if the order service's only path to inventory data is a direct synchronous call, an inventory service blip returns an error to every caller, even though a slightly stale answer from cache or a fallback table would have been good enough for most requests. Treating every dependency as strictly required — rather than distinguishing "must have fresh data" from "stale data is acceptable" — turns partial, isolated failures into full-system unavailability.
+
+**Trade-off:** serving cached or fallback data means serving wrong or stale data in some cases (a "sold out" item shown as available, a stale price), which shifts the failure mode from visible errors to silent incorrectness that's harder to notice and can have its own business cost. It also requires building and maintaining the cache/fallback path itself, plus the async recovery loop to reconcile once the primary service is back — infrastructure that sits idle until the primary service actually fails.
+
 ### Degradation Levels
+
+Fallback tiers a system can drop through as dependencies become unavailable, from full service to maintenance mode.
 
 | Level | Behavior | User Impact |
 |-------|----------|-------------|
@@ -380,7 +434,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+Retry policies, DLQs, circuit breakers, and graceful degradation are all code paths that, by definition, only run when something is already broken — which in most systems means they run for the first time during a real production incident, with no prior evidence they actually work. A DLQ redrive Lambda with a bug, a circuit breaker threshold that never trips, or a fallback path that itself throws an exception all look fine in normal operation and only surface when the primary path fails, which is the worst possible time to discover it.
+
+**Trade-off:** chaos experiments are themselves a source of risk — injecting real faults (timeouts, throttling, connection kills) into a live or production-like environment can cause the exact outage you're testing resilience against if scoped incorrectly, which is why AWS FIS's stop conditions and blast-radius targeting are load-bearing, not optional. Building and maintaining the experiment catalog and injection tooling is also ongoing work with no feature-facing payoff, so it tends to get deprioritized unless resilience is treated as a first-class requirement.
+
 ### Chaos Experiment Catalog
+
+Sample fault-injection experiments, the expected resilient behavior, and how to validate it.
 
 | Experiment | Injection Method | Expected Behavior | Validation |
 |-----------|-----------------|------------------|------------|
@@ -423,6 +485,8 @@ AWS FIS is a managed service for running chaos experiments. Use it instead of ma
 
 ### Monitoring & Alerting
 
+Warning and critical thresholds for the key resilience metrics, with the recommended action at each level.
+
 | Metric | Warning | Critical | Action |
 |--------|---------|----------|--------|
 | Lambda Error Rate | >1% | >5% | Investigate logs |
@@ -436,6 +500,8 @@ AWS FIS is a managed service for running chaos experiments. Use it instead of ma
 ---
 
 ## Anti-Patterns to Avoid
+
+Common error-handling mistakes and the fix for each.
 
 | Anti-Pattern | Problem | Solution |
 |-------------|---------|----------|

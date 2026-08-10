@@ -6,7 +6,23 @@ Event-driven architecture (EDA) is a software design pattern where components co
 
 ---
 
+## Table of Contents
+
+- [Core Services Comparison](#core-services-comparison)
+- [Pattern 1: Basic Pub-Sub Fan-Out](#pattern-1-basic-pub-sub-fan-out)
+- [Pattern 2: SQS Work Queue with Lambda](#pattern-2-sqs-work-queue-with-lambda)
+- [Pattern 3: FIFO Processing Pipeline](#pattern-3-fifo-processing-pipeline)
+- [Pattern 4: SNS to SQS Decoupling](#pattern-4-sns-to-sqs-decoupling)
+- [Pattern 5: Async Lambda Invocation with Retry](#pattern-5-async-lambda-invocation-with-retry)
+- [Pattern 6: EventBridge Event Router](#pattern-6-eventbridge-event-router)
+- [Pattern 7: Dead-Letter Queue (DLQ) Strategy](#pattern-7-dead-letter-queue-dlq-strategy)
+- [Anti-Patterns to Avoid](#anti-patterns-to-avoid)
+
+---
+
 ## Core Services Comparison
+
+Key delivery, ordering, and payload characteristics of the core AWS event-driven services, to help pick the right building block.
 
 | Service | Type | Delivery Guarantee | Ordering | Max Payload | Retention | Use Case |
 |---------|------|-------------------|----------|-------------|-----------|----------|
@@ -33,7 +49,15 @@ graph LR
     E -->|Poll| G[Lambda<br/>Analytics Worker]
 ```
 
+### Why This Pattern?
+
+Without fan-out, a producer that needs three things to happen after an event (update inventory, send a notification, feed analytics) either calls each consumer directly — coupling the producer to every consumer's availability and API — or one "orchestrator" consumer calls the others, becoming a single point of failure. Publishing once to an SNS topic removes that coupling: the producer doesn't know or care how many subscribers exist, new consumers subscribe without any producer change or redeploy, and one subscriber's outage doesn't block delivery to the others.
+
+**Trade-off:** SNS gives no ordering guarantee and at-least-once delivery, so every subscriber must tolerate duplicates and out-of-order arrival. SNS also doesn't buffer — a subscriber that's down when the message is published needs its own DLQ/retry policy to avoid silently losing that delivery.
+
 ### Decision Criteria
+
+Signals that indicate this fan-out pattern is the right fit.
 
 | Factor | Recommendation |
 |--------|---------------|
@@ -77,7 +101,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+Calling Lambda directly (or any synchronous downstream call) ties the producer's response time to however long processing takes, and a burst of incoming requests either overwhelms the consumer's concurrency or gets rejected outright — there's nothing absorbing the spike. Putting an SQS queue in front of Lambda decouples the producer's send rate from the consumer's processing rate: producers enqueue and move on immediately, and Lambda drains the queue at a pace it controls (via `MaximumConcurrency`, batch size, batching window), turning a traffic spike into a longer, safer processing tail instead of dropped or throttled requests.
+
+**Trade-off:** processing is no longer immediate — callers get eventual completion, not a synchronous result — and queue depth becomes a metric you must monitor, since a queue that grows faster than it drains is a silent backlog rather than a visible error.
+
 ### SQS Event Source Mapping Parameters
+
+Key event source mapping settings that control batching, concurrency, and retry behavior between SQS and Lambda.
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
@@ -108,6 +140,8 @@ Example: For 5 KB messages, 2s Lambda duration, batch size 10:
     For 500 peak EPS: Required pollers = 500 / 50 = 10
 ```
 
+Recommended poller range and concurrency ceiling by workload profile:
+
 | Workload Profile | Min Pollers | Max Pollers | Max Concurrent Invocations |
 |-----------------|-------------|-------------|---------------------------|
 | Low throughput | 2 | 200 | Scales at default rate |
@@ -134,7 +168,15 @@ graph LR
     end
 ```
 
+### Why This Pattern?
+
+SQS Standard and SNS only guarantee at-least-once delivery with best-effort ordering — acceptable for independent events, but not for a sequence of state transitions on the same entity (e.g., "order created" must be applied before "order cancelled" for the same order, or duplicate delivery of "charge card" must not double-charge). Processing those out of order or twice corrupts state rather than just duplicating work. FIFO queues fix this by guaranteeing strict in-order delivery and exactly-once processing within a `MessageGroupId`, so events for the same business key (e.g., order ID) are always applied in the sequence they were sent, exactly once.
+
+**Trade-off:** ordering is enforced by limiting Lambda to one concurrent consumer per `MessageGroupId`, so overall throughput is bounded by how many distinct group IDs you have and FIFO queues have a lower overall throughput ceiling than Standard — don't reach for FIFO unless ordering/dedup is an actual requirement, not just a "safer default."
+
 ### FIFO Queue Configuration
+
+Settings that enforce ordering and exactly-once semantics on the queue.
 
 | Setting | Value | Effect |
 |---------|-------|--------|
@@ -181,6 +223,8 @@ graph TB
 ```
 
 ### Why This Pattern?
+
+Benefits of routing through per-consumer SQS queues instead of delivering directly from SNS.
 
 | Benefit | Description |
 |---------|-------------|
@@ -237,7 +281,15 @@ graph TB
     J -->|Failure| L[Failure Destination]
 ```
 
+### Why This Pattern?
+
+A synchronous Lambda invocation blocks the caller until the target finishes, so a slow or failing downstream function directly costs the caller time and money, and a chain of synchronous calls (Lambda → Lambda → Lambda) multiplies timeouts and cold starts across every hop. Asynchronous invocation removes that coupling with no extra infrastructure to stand up: Lambda queues the event internally, retries transient failures for you (twice, with backoff), and lets you route success/failure outcomes to a destination — the caller fires the event and returns immediately.
+
+**Trade-off:** the internal queue is fully managed by AWS and opaque — there's no visibility into its depth and no way to tune batching or concurrency the way you can with an explicit SQS queue — so for high-throughput or bursty workloads where you need backpressure control, use an explicit SQS/SNS intermediary (Pattern 2 or Pattern 4) instead of relying on Lambda's built-in async queue.
+
 ### Async Invocation Configuration
+
+Key parameters for controlling retries, event age, and success/failure routing on async Lambda invocations.
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
@@ -284,7 +336,15 @@ graph TB
     C -->|Rule: inventory.low| I[Step Functions<br/>Restock Workflow]
 ```
 
+### Why This Pattern?
+
+As a system accumulates event producers (AWS services, custom apps) and consumers, hardcoding each producer-to-consumer relationship creates an N×M web of point-to-point integrations — every new consumer means changing producer code, and every producer needs to know about every consumer that cares about its events. EventBridge decouples this: producers publish once to a bus, and declarative rules (not producer code) decide which consumers receive which events based on event content. Consumers are added, removed, or rerouted by changing rules alone, and EventBridge's native integration with 200+ AWS services means many event sources need no custom producer code at all.
+
+**Trade-off:** the extra routing layer makes it harder to trace an event's full path end-to-end without tracing/observability tooling, and rule evaluation adds a small amount of latency versus a direct point-to-point call — not suitable when you need the lowest-latency, simplest possible producer-to-consumer link.
+
 ### EventBridge Rule Types
+
+The three ways an EventBridge rule can select and act on events.
 
 | Rule Type | Match Strategy | Use Case |
 |-----------|---------------|----------|
@@ -332,7 +392,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+Without a DLQ, a message that can never succeed — a "poison pill" caused by malformed data, an unrecoverable bug, or a downstream outage — either retries forever (burning compute and delaying every message behind it in the queue) or gets silently discarded once retries run out, and either way you lose visibility into what failed and why. Routing exhausted messages to a DLQ instead stops them from blocking the healthy flow while preserving them for inspection, alerting, and deliberate reprocessing.
+
+**Trade-off:** a DLQ is only useful if something watches it — it needs its own alarm on queue depth and a defined reprocessing/triage plan, otherwise failures just accumulate silently in a different queue instead of the original one.
+
 ### DLQ Configuration Matrix
+
+How dead-letter handling is wired up per event source.
 
 | Source | DLQ Target | Redrive Setting | Monitoring |
 |--------|-----------|-----------------|------------|
@@ -349,6 +417,8 @@ graph TB
 ---
 
 ## Anti-Patterns to Avoid
+
+Common mistakes in event-driven designs and the recommended fix for each.
 
 | Anti-Pattern | Problem | Solution |
 |-------------|---------|----------|

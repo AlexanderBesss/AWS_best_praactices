@@ -6,7 +6,23 @@ Serverless communication patterns define how Lambda functions, APIs, and event s
 
 ---
 
+## Table of Contents
+
+- [Communication Mechanisms Comparison](#communication-mechanisms-comparison)
+- [Pattern 1: Synchronous Lambda Invocation Chain](#pattern-1-synchronous-lambda-invocation-chain)
+- [Pattern 2: API Gateway + Lambda REST API](#pattern-2-api-gateway--lambda-rest-api)
+- [Pattern 3: Async Processing with SQS Buffer](#pattern-3-async-processing-with-sqs-buffer)
+- [Pattern 4: Lambda Service-to-Service Communication](#pattern-4-lambda-service-to-service-communication)
+- [Pattern 5: EventBridge as Central Nervous System](#pattern-5-eventbridge-as-central-nervous-system)
+- [Pattern 6: Step Functions Orchestration](#pattern-6-step-functions-orchestration)
+- [Pattern 7: WebSocket API with Lambda](#pattern-7-websocket-api-with-lambda)
+- [Anti-Patterns to Avoid](#anti-patterns-to-avoid)
+
+---
+
 ## Communication Mechanisms Comparison
+
+Latency, cost, and payload limits across the available serverless communication mechanisms.
 
 | Mechanism | Type | Latency | Cost (US East) | Max Payload | Best For |
 |-----------|------|---------|----------------|-------------|----------|
@@ -51,7 +67,15 @@ sequenceDiagram
     API-->>Client: Response
 ```
 
+### Why This Pattern?
+
+When the caller — a person submitting a form, or another service — needs a definitive answer before it can proceed ("was this order accepted," "was the payment approved"), polling or async callbacks add complexity the caller doesn't want. A synchronous chain gets that answer back in a single round trip with the simplest possible programming model: call, wait, get result.
+
+**Trade-off:** every hop's latency, cold start, and failure mode sits on the critical path of the response. A single slow or failing downstream call fails the entire request, and there's no partial progress if step 3 of 4 succeeds but step 4 times out — the deeper the chain, the more fragile it gets.
+
 ### Decision Matrix
+
+When to keep a synchronous chain versus switching to an async alternative.
 
 | Factor | Sync Chain | Async Alternative |
 |--------|-----------|-------------------|
@@ -110,7 +134,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+A Lambda Function URL works for exposing a single endpoint, but a real API needs request validation, authentication/authorization, throttling, usage tiers, and multiple routes mapped to different functions — reimplementing all of that inside every Lambda is duplicated effort and produces inconsistent behavior across endpoints. API Gateway centralizes those cross-cutting concerns in front of Lambda, so each function only implements its own business logic while auth, throttling, validation, and caching are configured once at the API layer.
+
+**Trade-off:** API Gateway adds its own latency and per-call cost on top of Lambda's, and REST API in particular is markedly more expensive than HTTP API for the same traffic — pick the cheaper HTTP API unless you specifically need REST-only features like WebSocket or canary deployments.
+
 ### API Gateway Configuration Best Practices
+
+Key settings to configure on an API Gateway REST API and why each matters.
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
@@ -124,6 +156,8 @@ graph TB
 
 ### REST API vs HTTP API
 
+Side-by-side comparison to help choose between API Gateway's two REST-style API types.
+
 | Feature | REST API | HTTP API |
 |---------|----------|----------|
 | Cost | $3.50/M calls | $0.35/M calls (10x cheaper) |
@@ -134,6 +168,8 @@ graph TB
 | Best for | Complex APIs, migration | New APIs, cost-sensitive |
 
 ### Lambda Authorizer Types
+
+Authorizer options for API Gateway, their caching behavior, and typical use case.
 
 | Type | Caching | Use Case |
 |------|---------|----------|
@@ -170,6 +206,12 @@ graph TB
     M -->|Read| D
 ```
 
+### Why This Pattern?
+
+Some requests take longer to process than an HTTP client is willing to hold a connection open for (file processing, third-party calls, batch work), but the client still needs confirmation the request was received and a way to check progress. This pattern accepts the request immediately (`202 Accepted`) and does the real work asynchronously behind an SQS buffer, trading "wait for the answer" for "get acknowledged, then poll or get notified" — which scales far better under load because the API layer's response time no longer depends on how long processing takes, and a burst of requests queues up instead of timing out the caller.
+
+**Trade-off:** the client needs a status-checking mechanism (polling endpoint or webhook/notification), and the overall user experience is more complex than a plain synchronous response — only worth the added moving parts when processing time genuinely exceeds what a synchronous call can tolerate.
+
 ### API Response Pattern
 
 ```json
@@ -183,6 +225,8 @@ graph TB
 ```
 
 ### SQS Buffer Sizing
+
+Recommended queue and Lambda concurrency settings by expected message load.
 
 | Expected Load | Queue Visibility Timeout | Lambda Batch Size | Max Concurrency | Reserved Concurrency |
 |--------------|------------------------|-------------------|-----------------|---------------------|
@@ -239,7 +283,15 @@ graph TB
     end
 ```
 
+### Why This Pattern?
+
+In a microservices-style Lambda architecture, one service's function often needs to call another directly — validate a payment, check inventory — without the overhead of standing up API Gateway or a queue for what's a purely internal, low-throughput call. Direct SDK invocation (`lambda.invoke()`) is the lowest-latency, no-extra-infrastructure way to make that call, synchronously or asynchronously, within the same account/region.
+
+**Trade-off:** it creates the same tight coupling as any direct call — the caller hardcodes the callee's function ARN and must have IAM permission to invoke it — so it doesn't scale well to fan-out (use SNS/EventBridge instead) and shouldn't be used across regions, where SQS or EventBridge handle the latency and reliability concerns better.
+
 ### Invocation Types for Service-to-Service
+
+Which Lambda invocation type to use depending on the calling scenario.
 
 | Scenario | Invocation | Rationale |
 |----------|-----------|-----------|
@@ -337,7 +389,15 @@ graph TB
     C -->|AWS Events| N[SQS Queue<br/>backup-trigger]
 ```
 
+### Why This Pattern?
+
+As the number of internal services, AWS-native events, and third-party SaaS event sources grows, no team can manage that many point-to-point integrations and subscriptions by hand — every new producer or consumer would mean coordinating a change with every counterpart. EventBridge acts as the single hub any producer (internal service, AWS service, SaaS partner) publishes to, and any consumer subscribes to via declarative rules, replacing what would otherwise be dozens of ad hoc, hardcoded integrations with one place to see and manage event flow.
+
+**Trade-off:** centralizing everything through one bus means a misconfigured or overly broad rule can silently misroute events across the whole system, so rule patterns and access control need the same rigor as code — and for very high-throughput ordered streams, EventBridge is still the wrong tool (use Kinesis).
+
 ### EventBridge Schema Registry
+
+Capabilities provided by the EventBridge Schema Registry for managing event contracts.
 
 | Feature | Description |
 |---------|-------------|
@@ -381,7 +441,15 @@ graph TB
     J --> L
 ```
 
+### Why This Pattern?
+
+A workflow with several steps, conditional branches, retries, and compensating actions (e.g., refund the payment if the inventory update fails) quickly becomes unmanageable as nested try/catch blocks spread across chained Lambda functions — state tracking is manual, errors are easy to lose, and there's no way to see where a given execution actually is. Step Functions externalizes that control flow into a declarative state machine: branching, retry/backoff, and error handling become configuration instead of code, and every execution gets a visual history that makes debugging a stuck or failed workflow far faster than grepping CloudWatch Logs across multiple functions.
+
+**Trade-off:** state transitions cost money independently of Lambda invocations (`$25/M transitions` for Standard), and for a workflow that's just 1-2 steps with no branching, that overhead and the added indirection outweigh the benefit — a direct Lambda chain is cheaper and simpler.
+
 ### Step Functions State Types
+
+Built-in state types available in a Step Functions state machine definition.
 
 | State Type | Purpose | Configuration |
 |-----------|---------|---------------|
@@ -399,6 +467,8 @@ graph TB
 - Don't use Express for workflows needing human tasks or >5 min duration — use Standard
 
 ### Step Functions vs Direct Lambda Chaining
+
+Trade-offs between orchestrating with Step Functions versus chaining Lambda calls directly.
 
 | Aspect | Step Functions Standard | Step Functions Express | Lambda Chain |
 |--------|----------------------|----------------------|--------------|
@@ -438,7 +508,15 @@ graph TB
     E -->|Delete Record| F
 ```
 
+### Why This Pattern?
+
+HTTP request-response, even with polling, can't push an update to the client the instant something happens — the client has to keep asking, and its view is always slightly stale, wasting requests when nothing has changed. A WebSocket API keeps a persistent connection open so the server can push data (chat messages, live dashboards, notifications) to the client the moment it's available, with no client-initiated request needed for each update.
+
+**Trade-off:** connections are stateful and must be tracked and cleaned up explicitly (a connections table, `$disconnect` handling), which is more operationally complex than stateless HTTP — reserve WebSocket for cases where real-time push is an actual product requirement, not a nice-to-have.
+
 ### WebSocket Lifecycle
+
+The routes triggered at each stage of a WebSocket connection and the Lambda action each performs.
 
 | Route | Event | Lambda Action |
 |-------|-------|--------------|
@@ -455,6 +533,8 @@ graph TB
 ---
 
 ## Anti-Patterns to Avoid
+
+Common communication mistakes and the fix for each.
 
 | Anti-Pattern | Problem | Solution |
 |-------------|---------|----------|
