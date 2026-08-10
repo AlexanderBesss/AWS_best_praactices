@@ -21,12 +21,28 @@ A comprehensive, structured reference guide covering best practices across all m
 | [DynamoDB Best Practices](Database/DynamoDB-Best-Practices.md) | NoSQL design patterns, capacity modes, partition keys, GSIs, and cost optimization |
 | [ElastiCache Best Practices](Database/ElastiCache-Best-Practices.md) | Caching strategies, Redis vs Memcached, clustering, failover, and data consistency |
 
+### Architecture Design Patterns
+| Document | Description |
+|----------|-------------|
+| [Event-Driven Patterns](Design/01-event-driven-patterns.md) | Lambda + SNS + SQS patterns: pub-sub fan-out, work queues, FIFO pipelines, async invocation, DLQ strategies |
+| [Communication Patterns](Design/02-communication-patterns.md) | Sync/async invocation, API Gateway, WebSocket, Step Functions orchestration, service-to-service |
+| [Error Handling Patterns](Design/03-error-handling-patterns.md) | Retry strategies, circuit breakers, idempotency, bulkhead, graceful degradation, chaos engineering |
+| [Cross-Cutting Patterns](Design/04-cross-cutting-patterns.md) | Saga, CQRS, event sourcing, multi-tenant, batch processing, multi-region active-active |
+| [Database Integration Patterns](Design/05-database-integration-patterns.md) | Lambda + DynamoDB/RDS patterns: RDS Proxy, Streams, CQRS, multi-region, transactional outbox |
+
 ### Serverless
 | Document | Description |
 |----------|-------------|
 | [Lambda Best Practices](Serverless/Lambda-Best-Practices.md) | Function design, cold starts, memory sizing, timeouts, and error handling |
 | [API Gateway Best Practices](Serverless/API-Gateway-Best-Practices.md) | API design, throttling, caching, authorization, and stage management |
 | [EventBridge Best Practices](Serverless/EventBridge-Best-Practices.md) | Event-driven architecture, bus design, rule patterns, and error handling |
+
+### Database
+| Document | Description |
+|----------|-------------|
+| [RDS Best Practices](Database/RDS-Best-Practices.md) | Relational database provisioning, backups, scaling, multi-AZ, and engine selection |
+| [DynamoDB Best Practices](Database/DynamoDB-Best-Practices.md) | NoSQL design patterns, capacity modes, partition keys, GSIs, and cost optimization |
+| [ElastiCache Best Practices](Database/ElastiCache-Best-Practices.md) | Caching strategies, Redis vs Memcached, clustering, failover, and data consistency |
 
 ### Networking
 | Document | Description |
@@ -117,6 +133,9 @@ graph LR
         P3["EventBridge"]
         P4["CloudFront"]
         P5["ECS/EKS"]
+        P6["Event-Driven Patterns"]
+        P7["Communication Patterns"]
+        P8["Cross-Cutting Patterns"]
     end
 
     subgraph CostOptimization["Cost Optimization"]
