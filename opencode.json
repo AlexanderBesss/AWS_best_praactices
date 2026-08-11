@@ -42,7 +42,7 @@
             "name": "llama.cpp (local)",
             "options": {
                 "baseURL": "http://192.168.0.96:8080/v1",
-                "apiKey": "docker"
+                "apiKey": "empty"
             },
             "models": {
                 "unsloth/Qwen3.6-27B-UD-Q4_K_XL": {
@@ -54,8 +54,8 @@
                     "presence_penalty": 0.0,
                     "top_p": 0.95,
                     "limit": {
-                        "context": 100000,
-                        "output": 8192
+                        "context": 80000,
+                        "output": 31000
                     },
                     "cost": {
                         "input": 0.00000005,
