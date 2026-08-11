@@ -6,11 +6,11 @@
 
 | Element | Description | Best Practice |
 |---------|-------------|---------------|
-| **AWSTemplateFormatVersion** | Template format version | Optional — omit for latest default behavior |
+| **AWSTemplateFormatVersion** | Template format version | Optional; if present, use the only supported value, `2010-09-09` |
 | **Description** | Template description | Clear, concise |
 | **Parameters** | User inputs | Validate with AllowedValues, Constraints |
 | **Mappings** | Static lookups | Region-to-AMI mappings |
-| **Conditions** | Conditional creation | Use Fn::If for conditional resources |
+| **Conditions** | Conditional creation/configuration | Use a resource `Condition` attribute to include a resource; use `Fn::If` for conditional property values |
 | **Resources** | AWS resources | Modular, logical IDs |
 | **Outputs** | Return values | Export for cross-stack references |
 | **Metadata** | Additional info | AWS::CloudFormation::Interface |
@@ -33,31 +33,22 @@
 
 | Level | Stack | Responsibility |
 |-------|-------|---------------|
-| **Root** | Network stack | VPC, subnets, routing |
-| **Child** | Compute stack | EC2, ASG, launch templates |
-| **Child** | Database stack | RDS, parameter groups |
-| **Child** | Application stack | App-specific resources |
+| **Foundation** | Network stack | VPC, subnets, routing |
+| **Platform** | Compute stack | EC2, Auto Scaling groups, launch templates |
+| **Data** | Database stack | RDS, parameter groups |
+| **Workload** | Application stack | App-specific resources |
 
 ```mermaid
-graph TB
-    Root["Root Stack<br/>Network Stack"]
-    Root --> Child1["Child Stack<br/>Compute Stack"]
-    Root --> Child2["Child Stack<br/>Database Stack"]
-    Root --> Child3["Child Stack<br/>Application Stack"]
+flowchart TB
+    N["Foundation stack<br/>VPC / subnets / routing"]
+    P["Platform stack<br/>compute / cluster / ingress"]
+    D["Data stack<br/>databases / storage"]
+    A["Workload stack<br/>application resources"]
 
-    Child1 --> R1["EC2 Instances"]
-    Child1 --> R2["Auto Scaling Group"]
-    Child1 --> R3["Launch Templates"]
-
-    Child2 --> R4["RDS Instance"]
-    Child2 --> R5["Parameter Groups"]
-    Child2 --> R6["Subnet Groups"]
-
-    Child3 --> R7["Application Resources"]
-    Child3 --> R8["Security Groups"]
-    Child3 --> R9["IAM Roles"]
-
-    Root --> R0["VPC / Subnets / Routing"]
+    N -->|outputs, parameters, or discovery| P
+    N -->|network placement| D
+    P -->|platform endpoints| A
+    D -->|data endpoints| A
 ```
 
 ### Nested Stacks
@@ -81,7 +72,7 @@ graph TB
 
 ### CloudFormation Modules
 
-CloudFormation Modules (`AWS::CloudFormation::ModuleVersion`) package a set of resources as a reusable, versioned building block that can be referenced directly in a template's `Resources` section, unlike nested stacks which deploy as separate child stacks.
+CloudFormation Modules package resources as reusable, versioned building blocks in the CloudFormation registry. A template references the registered module type name in its `Resources` section; `AWS::CloudFormation::ModuleVersion` is the resource used to register a module version, not the type consumers normally place in workload templates.
 
 | Approach | Deployment Unit | Versioning | Use Case |
 |----------|-----------------|------------|----------|
@@ -111,7 +102,8 @@ CloudFormation Modules (`AWS::CloudFormation::ModuleVersion`) package a set of r
 | **AWS::EC2::Subnet::Id** | Subnet IDs | Subnet selection |
 | **AWS::EC2::SecurityGroup::Id** | SG IDs | Security groups |
 | **AWS::EC2::VPC::Id** | VPC IDs | VPC selection |
-| **List<String>** | String list | Multiple strings |
+| **List<Number>** | Comma-separated numbers | Numeric lists |
+| **List<AWS-specific type>** | Existing AWS resources | Multiple subnets, security groups, and similar resources |
 
 ### Parameter Validation
 
@@ -133,7 +125,8 @@ CloudFormation Modules (`AWS::CloudFormation::ModuleVersion`) package a set of r
 | **Fn::And** | Logical AND | Multiple conditions |
 | **Fn::Or** | Logical OR | Alternative conditions |
 | **Fn::Not** | Logical NOT | Negation |
-| **Fn::Contains** | List contains value (Rules section only) | Parameter validation in Rules |
+
+The separate `Rules` section supports rule functions such as `Fn::Contains` for validating parameter combinations before resource creation.
 
 ---
 
@@ -143,18 +136,18 @@ CloudFormation Modules (`AWS::CloudFormation::ModuleVersion`) package a set of r
 
 | Action | Description | Frequency |
 |--------|-------------|-----------|
-| **Detect drift** | Compare stack vs actual | Weekly |
-| **Detect drift (scheduled)** | Automated detection | Daily |
+| **Detect drift** | Compare supported resources with expected configuration | Based on change risk |
+| **Schedule drift detection** | Use EventBridge Scheduler with Lambda/Step Functions or another automation; CloudFormation does not schedule it itself | Periodic governance |
 | **Update stack** | Fix drifted resources | As needed |
 | **Import resources** | Add existing resources | Migration |
-| **Export templates** | Generate from existing | Documentation |
+| **IaC generator** | Scan supported existing resources and generate/import a template | Migration starting point; review before deployment |
 
 ### Drift Causes
 
 | Cause | Prevention | Resolution |
 |-------|-----------|------------|
 | Manual console changes | SCPs to deny changes | Update template |
-| Auto-scaling changes | Manage via template | Import or update |
+| Expected service-managed changes | Avoid treating runtime state such as Auto Scaling membership as template-owned configuration | Review resource-specific drift semantics |
 | Cross-stack changes | Update all stacks | Coordinated update |
 | AWS service updates | Monitor for changes | Update template |
 
@@ -196,6 +189,8 @@ graph LR
 | **Replace** | New resource, same logical ID | High |
 | **Import** | Existing resource into stack | Medium |
 
+Change sets improve review but do not guarantee that an update will succeed. They can also omit the resolved values of dynamic references. Review replacements, IAM changes, macros, and downstream service effects before execution.
+
 ---
 
 ## CloudFormation Hooks
@@ -204,7 +199,7 @@ graph LR
 
 | Component | Description | Use Case |
 |-----------|-------------|----------|
-| **Hook** | Runs before a create/update/delete is provisioned | Block or warn on non-compliant resources |
+| **Hook** | Evaluates resource, stack, change-set, or Cloud Control operations at supported invocation points | Block or warn on non-compliant changes |
 | **Guard-based Hook** | Hook logic authored in CloudFormation Guard DSL, no Lambda needed | Policy-as-code checks (tagging, encryption, sizing) |
 | **Lambda-based Hook** | Custom logic via the CloudFormation Hooks CLI/SDK | Complex or external validation |
 | **Target actions** | CREATE, UPDATE, DELETE | Scope enforcement to specific operations |
@@ -214,7 +209,7 @@ Hooks run before drift can occur, complementing drift detection (which is reacti
 
 ---
 
-## Stack Policies
+## Resource and Stack Protection
 
 ### Protection
 
@@ -229,12 +224,16 @@ Hooks run before drift can occur, complementing drift detection (which is reacti
 
 ### Stack Policy Example
 
+Stack policies apply only to stack **updates**. They do not prevent deletion of the stack. Use termination protection for that, and use `DeletionPolicy`/`UpdateReplacePolicy` to control what happens to individual resources.
+
+The table shows the intended effect by resource class. In an actual stack policy, scope statements to logical resource IDs or use a `ResourceType` condition.
+
 | Resource Type | Allow | Deny |
 |--------------|-------|------|
-| AWS::RDS::DBInstance | Update: All | Replace, Delete |
-| AWS::DynamoDB::Table | Update: All | Replace, Delete |
-| AWS::S3::Bucket | Update: All | Replace, Delete |
-| * | All | — |
+| AWS::RDS::DBInstance | `Update:Modify` | `Update:Replace`, `Update:Delete` |
+| AWS::DynamoDB::Table | `Update:Modify` | `Update:Replace`, `Update:Delete` |
+| AWS::S3::Bucket | `Update:Modify` | `Update:Replace`, `Update:Delete` |
+| Other resources | `Update:*` | — |
 
 ---
 
@@ -244,7 +243,7 @@ Hooks run before drift can occur, complementing drift detection (which is reacti
 
 | Macro | Description | Use Case |
 |-------|-------------|----------|
-| **AWS::Include** | Include external YAML/JSON (limited support, prefer !Sub) | Template reuse |
+| **AWS::Include** | Insert a valid key-value snippet from an S3 URI | Reuse boilerplate snippets |
 | **AWS::Serverless** | SAM template transformation | Serverless apps |
 | **Custom macros** | Lambda-based transformations | Custom logic |
 
@@ -273,14 +272,14 @@ Hooks run before drift can occur, complementing drift detection (which is reacti
 | DELETE_IN_PROGRESS | Stack deletion started | Verify backups |
 | DELETE_COMPLETE | Stack deleted successfully | Clean up |
 
-### CloudWatch Integration
+### Event Monitoring
 
-| Metric | Description | Alert |
-|--------|-------------|-------|
-| Stack creation time | Duration of CREATE | > baseline |
-| Stack update time | Duration of UPDATE | > baseline |
-| Stack failures | Failed operations | Any |
-| Drift status | Drifted resources | Any drift |
+| Signal | Source | Action |
+|--------|--------|--------|
+| Stack/resource status changes | EventBridge | Notify or automate remediation for failure and rollback states |
+| Drift-detection status changes | EventBridge | Review `DRIFTED` resources |
+| Stack events | CloudFormation API/console | Diagnose the first failed resource |
+| API activity | CloudTrail | Audit who changed stacks, templates, and protection settings |
 
 ---
 
@@ -290,7 +289,7 @@ Hooks run before drift can occur, complementing drift detection (which is reacti
 |----------|-------------|-------------------|
 | **Terminate on failure** | Delete on CREATE failure | Prevent orphaned resources |
 | **DeletionPolicy** | Snapshot vs retain | Storage cost management |
-| **Nested stacks** | Reuse common resources | Avoid duplication |
+| **Reusable templates/modules** | Standardize patterns without assuming resources are shared at runtime | Reduce maintenance duplication |
 | **Conditional resources** | Create only when needed | Resource cost reduction |
 | **Tagging** | Cost allocation tags | Cost tracking |
 | **Cleanup stacks** | Delete unused stacks | Eliminate costs |
@@ -304,8 +303,26 @@ Hooks run before drift can occur, complementing drift detection (which is reacti
 | CloudFormation StackSets | Multi-account, multi-region | Enterprise deployments |
 | Service Catalog | Product deployment | Self-service |
 | CodePipeline | Automated deployments | CI/CD |
-| CloudWatch | Stack events, metrics | Monitoring |
+| CloudWatch | Rollback-trigger alarms | Automated rollback protection |
 | Config | Compliance rules | Governance |
 | Systems Manager | Parameter integration | Configuration |
 | Lambda | Custom resources | Extension |
 | SNS | Stack event notifications | Alerts |
+
+---
+
+## Additional Best Practices
+
+- Enable termination protection for critical stacks and set explicit `DeletionPolicy` and `UpdateReplacePolicy` values for stateful resources.
+- Use rollback triggers tied to CloudWatch alarms for high-risk updates, and retain enough monitoring time to detect regressions.
+- Validate templates with `cfn-lint`; use CloudFormation Guard or Hooks for organizational policy enforcement.
+- Avoid hard-coding secrets or sensitive parameter defaults. Use Secrets Manager or Parameter Store dynamic references and mark sensitive parameters `NoEcho` (while recognizing that `NoEcho` does not redact values placed in metadata or outputs).
+- Pin nested templates and modules to immutable, versioned artifacts; review macro-expanded templates because macros can transform the entire template.
+
+## AWS References
+
+- [CloudFormation template anatomy](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/template-anatomy.html)
+- [CloudFormation parameter types](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/parameters-section-structure.html)
+- [Monitoring CloudFormation events with EventBridge](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/eventbridge-integration.html)
+- [CloudFormation Hooks concepts](https://docs.aws.amazon.com/cloudformation-cli/latest/hooks-userguide/hooks-concepts.html)
+- [Protecting resources during stack updates](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/protect-stack-resources.html)

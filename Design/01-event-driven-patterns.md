@@ -17,6 +17,7 @@ Event-driven architecture (EDA) is a software design pattern where components co
 - [Pattern 6: EventBridge Event Router](#pattern-6-eventbridge-event-router)
 - [Pattern 7: Dead-Letter Queue (DLQ) Strategy](#pattern-7-dead-letter-queue-dlq-strategy)
 - [Anti-Patterns to Avoid](#anti-patterns-to-avoid)
+- [Authoritative References](#authoritative-references)
 
 ---
 
@@ -26,12 +27,13 @@ Key delivery, ordering, and payload characteristics of the core AWS event-driven
 
 | Service | Type | Delivery Guarantee | Ordering | Max Payload | Retention | Use Case |
 |---------|------|-------------------|----------|-------------|-----------|----------|
-| **SNS** | Pub/Sub (push) | At-least-once | None | 256 KB | N/A (push) | Fan-out, notifications, broadcast |
-| **SQS Standard** | Queue (pull) | At-least-once | Best-effort FIFO | 1 MiB (raised from 256 KB, Aug 2025) | 1-14 days | Async processing, decoupling |
-| **SQS FIFO** | Queue (pull) | Exactly-once (with Lambda ESM) | Strict FIFO | 1 MiB (raised from 256 KB, Aug 2025) | 1-14 days | Ordered processing, deduplication |
-| **EventBridge** | Event bus (push) | At-least-once | None | 1 MB (raised from 256 KB, Jan 2026) | Configurable (archive) | Event routing, service integration |
+| **SNS Standard** | Pub/Sub (push) | At-least-once | No ordering guarantee | 256 KB | Endpoint-specific retries; optional subscription DLQ | Fan-out, notifications, broadcast |
+| **SNS FIFO** | Pub/Sub (push) | At-least-once with five-minute deduplication | Per message group | 256 KB | Optional archive and replay (up to 365 days) | Ordered fan-out to SQS FIFO queues |
+| **SQS Standard** | Queue (pull) | At-least-once | Best effort | 1 MiB | 1-14 days | Async processing, decoupling |
+| **SQS FIFO** | Queue (pull) | Deduplicated enqueue; Lambda processing remains at-least-once | Per message group | 1 MiB | 1-14 days | Ordered processing, deduplication |
+| **EventBridge** | Event bus (push) | At-least-once | No ordering guarantee | Less than 1 MiB total per `PutEvents` request (up to 10 entries) | Optional archive with configurable retention | Event routing, service integration |
 | **Kinesis Data Streams** | Stream (pull) | At-least-once | Per shard | 1 MB | 24h-365 days | High-throughput ordered streaming |
-| **Lambda** | Compute (trigger) | At-least-once | Depends on trigger | 6 MB (sync) / 1 MB (async, raised from 256 KB, Oct 2025) | N/A | Event processing, transformation |
+| **Lambda** | Compute (trigger) | Depends on invocation source | Depends on trigger | 6 MB (sync) / 1 MB (async) | N/A | Event processing, transformation |
 
 ---
 
@@ -53,7 +55,7 @@ graph LR
 
 Without fan-out, a producer that needs three things to happen after an event (update inventory, send a notification, feed analytics) either calls each consumer directly — coupling the producer to every consumer's availability and API — or one "orchestrator" consumer calls the others, becoming a single point of failure. Publishing once to an SNS topic removes that coupling: the producer doesn't know or care how many subscribers exist, new consumers subscribe without any producer change or redeploy, and one subscriber's outage doesn't block delivery to the others.
 
-**Trade-off:** SNS gives no ordering guarantee and at-least-once delivery, so every subscriber must tolerate duplicates and out-of-order arrival. SNS also doesn't buffer — a subscriber that's down when the message is published needs its own DLQ/retry policy to avoid silently losing that delivery.
+**Trade-off:** SNS Standard topics provide no ordering guarantee and use at-least-once delivery, so subscribers must tolerate duplicates and out-of-order arrival. A Standard topic is not a durable per-consumer buffer: delivery follows the endpoint-specific retry policy, and a subscription DLQ is needed to retain messages after delivery retries are exhausted. SNS FIFO topics add per-message-group ordering and deduplication, but direct Lambda subscriptions are not supported; fan out through SQS FIFO queues instead.
 
 ### Decision Criteria
 
@@ -68,11 +70,11 @@ Signals that indicate this fan-out pattern is the right fit.
 
 ### Best Practices
 
-- Set **DeliveryPolicy** with exponential backoff on each SNS subscription
-- Use **MessageAttributes** for filtering at the SNS level (filters apply to `MessageAttributes`, not message body)
+- Configure an SNS subscription **redrive policy** with an SQS DLQ; custom delivery policies apply to HTTP/S subscriptions, not Lambda or SQS subscriptions
+- Use subscription filter policies with `FilterPolicyScope=MessageAttributes` (default) or `MessageBody` for payload-based filtering
 - Make Lambda consumers **idempotent** — SNS delivers at-least-once (see `03-error-handling-patterns.md` for idempotency patterns)
-- Use **Dead-Letter Queues (DLQ)** on each Lambda for failed processing
-- HTTP/HTTPS/email subscribers require confirmation; use `RawMessageDelivery` for Lambda/SQS to avoid envelope wrapping
+- Configure an SNS subscription DLQ for delivery failures; make the Lambda handler's own processing failures observable with alarms and destinations where applicable
+- HTTP/HTTPS/email subscribers require confirmation; raw message delivery is available for SQS and HTTP/S subscriptions, not Lambda subscriptions
 
 ### When NOT to Use
 
@@ -88,17 +90,22 @@ Use when you need reliable async message processing with backpressure control.
 ```mermaid
 graph TB
     A[Producer Services] -->|Send| B[SQS Standard Queue<br/>processing-queue]
-    B -->|Event Source Mapping| C{Lambda Function<br/>Batch Size: 10}
+    B --> M[Lambda event source mapping]
+    M --> C{Lambda Function<br/>Batch Size: 10}
     C -->|Success| D[(DynamoDB<br/>Processed Records)]
     C -->|Partial Failure| E[Report Batch Item Failures]
-    E -->|Retry| B
-    C -->|Total Failure| F[SQS DLQ<br/>error-queue]
+    E -->|After visibility timeout| B
+    C -->|Function or batch failure| B
+    B -->|SQS redrive after maxReceiveCount| F[SQS DLQ<br/>error-queue]
     
     subgraph "Scaling Configuration"
         G[Reserved Concurrency: 100]
-        H[Provisioned Concurrency: 10]
-        I[Batch Window: 60s]
+        H[Maximum Concurrency: 100]
+        I[Batch Window: 60s<br/>Standard queue only]
     end
+    G -.-> C
+    H -.-> M
+    I -.-> M
 ```
 
 ### Why This Pattern?
@@ -113,10 +120,10 @@ Key event source mapping settings that control batching, concurrency, and retry 
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
-| `BatchSize` | 1-10 | Messages per Lambda invocation |
-| `MaximumBatchingWindow` | 0-300s | Buffer time for larger batches (longer window = fewer invocations but higher latency) |
-| `MaximumConcurrency` | 1-10000 | Parallel Lambda invocations |
-| Queue `RedrivePolicy.maxReceiveCount` | 1-1000 | Retries before message moves to DLQ (SQS does not support Lambda's `MaximumRetryAttempts` ESM parameter — that applies only to stream sources like Kinesis/DynamoDB Streams) |
+| `BatchSize` | Standard: up to 10,000; FIFO: up to 10 | Messages per Lambda invocation; a standard-queue batch over 10 requires a batching window of at least 1 second |
+| `MaximumBatchingWindowInSeconds` | 0-300 (standard queues only) | Buffer time for larger batches (longer window = fewer invocations but higher latency) |
+| `ScalingConfig.MaximumConcurrency` | 2-1,000 | Caps concurrent function instances for this event source mapping; cannot be combined with provisioned mode |
+| Queue `RedrivePolicy.maxReceiveCount` | Workload-specific; Lambda recommends at least 5 | Receives before SQS moves a message to the DLQ; SQS event source mappings do not support `MaximumRetryAttempts` |
 | `FunctionResponseTypes` | `ReportBatchItemFailures` | Partial batch failure reporting |
 
 ### When NOT to Use
@@ -126,33 +133,13 @@ Key event source mapping settings that control batching, concurrency, and retry 
 
 ### Provisioned Mode (High-Throughput Workloads)
 
-```
-EPS per event poller = min(
-    ceiling(1024 / avg_event_size_KB),
-    ceiling(10 / avg_function_duration_s) * batch_size,
-    min(100, 10 * batch_size)
-)
-
-Required pollers = Peak_EPS / EPS_per_poller
-
-Example: For 5 KB messages, 2s Lambda duration, batch size 10:
-    EPS per poller = min(204, 50, 100) = 50
-    For 500 peak EPS: Required pollers = 500 / 50 = 10
-```
-
-Recommended poller range and concurrency ceiling by workload profile:
-
-| Workload Profile | Min Pollers | Max Pollers | Max Concurrent Invocations |
-|-----------------|-------------|-------------|---------------------------|
-| Low throughput | 2 | 200 | Scales at default rate |
-| Medium throughput | 10 | 1000 | 3x faster scaling |
-| High throughput | 100 | 10000 | Up to 1,000 concurrent invocations |
+Provisioned mode allocates dedicated SQS event pollers for workloads with strict latency or scaling requirements and incurs an additional charge. Configure `MinimumPollers` from 2-200 and `MaximumPollers` from 2-2,000. Each poller can handle up to 1 MiB/s, 10 concurrent invokes, or 10 SQS polling API calls per second. Size from measured payload size, function duration, batch size, and peak event rate, then monitor the `ProvisionedPollers` metric. Provisioned mode and `ScalingConfig.MaximumConcurrency` are mutually exclusive.
 
 ---
 
 ## Pattern 3: FIFO Processing Pipeline
 
-Use when strict ordering and exactly-once processing are required.
+Use when ordered delivery and producer-side deduplication are required. Consumers must still be idempotent.
 
 ```mermaid
 graph LR
@@ -160,7 +147,8 @@ graph LR
         A[Producer] -->|MessageGroup<br/>= orderId| B[SQS FIFO Queue<br/>order-processing.fifo]
         B -->|Event Source Mapping| C[Lambda<br/>Order Processor]
         C -->|Success| D[(DynamoDB)]
-        C -->|Failure| E[SQS FIFO DLQ<br/>order-dlq.fifo]
+        C -->|Failure, message becomes visible again| B
+        B -->|SQS redrive after maxReceiveCount| E[SQS FIFO DLQ<br/>order-dlq.fifo]
     end
     
     subgraph "Deduplication"
@@ -170,34 +158,35 @@ graph LR
 
 ### Why This Pattern?
 
-SQS Standard and SNS only guarantee at-least-once delivery with best-effort ordering — acceptable for independent events, but not for a sequence of state transitions on the same entity (e.g., "order created" must be applied before "order cancelled" for the same order, or duplicate delivery of "charge card" must not double-charge). Processing those out of order or twice corrupts state rather than just duplicating work. FIFO queues fix this by guaranteeing strict in-order delivery and exactly-once processing within a `MessageGroupId`, so events for the same business key (e.g., order ID) are always applied in the sequence they were sent, exactly once.
+SQS Standard provides at-least-once delivery and best-effort ordering — acceptable for independent events, but not for a sequence of state transitions on the same entity. FIFO queues preserve order within a `MessageGroupId` and prevent duplicate messages from being accepted during the deduplication interval. A Lambda event source mapping can still deliver a record more than once, for example when processing succeeds but deletion fails, so side effects such as charging a card must use an idempotency key.
 
 **Trade-off:** ordering is enforced by limiting Lambda to one concurrent consumer per `MessageGroupId`, so overall throughput is bounded by how many distinct group IDs you have and FIFO queues have a lower overall throughput ceiling than Standard — don't reach for FIFO unless ordering/dedup is an actual requirement, not just a "safer default."
 
 ### FIFO Queue Configuration
 
-Settings that enforce ordering and exactly-once semantics on the queue.
+Settings that enforce per-group ordering and producer-side deduplication on the queue.
 
 | Setting | Value | Effect |
 |---------|-------|--------|
 | `FifoQueue` | true | Enables FIFO semantics |
-| `ContentBasedDeduplication` | true | Uses SHA-256 of message body |
+| `ContentBasedDeduplication` | true | Uses a SHA-256 hash of the message body (not message attributes) during the five-minute deduplication interval |
 | `MessageGroupId` | Business key | Groups related messages |
-| `MessageDeduplicationId` | Unique ID | Prevents duplicate processing |
-| Visibility Timeout | 30-600s | Must exceed Lambda timeout |
+| `MessageDeduplicationId` | Unique ID | Prevents a duplicate enqueue within the five-minute deduplication interval; an explicit ID overrides content-based generation |
+| Visibility Timeout | Workload-specific | For Lambda event source mappings, set to at least six times the function timeout plus the batching window |
 
 ### Critical Rules
 
-- **Same MessageGroupId** = same consumer instance = strict ordering
-- **Different MessageGroupId** = parallel processing = no ordering guarantee
-- Lambda concurrency is **limited to 1 per MessageGroupId** in FIFO mode
-- Set visibility timeout > Lambda timeout + buffer
-- SQS FIFO in-flight message limit: 120,000 messages per queue (raised from 20,000 in Nov 2024) — relevant for backpressure planning
+- **Same MessageGroupId** = one batch at a time for that group, in order
+- **Different MessageGroupIds** can be processed in parallel; ordering is independent between groups
+- Lambda concurrency is capped by the number of active message groups and any configured concurrency limit
+- Set the visibility timeout to at least six times the function timeout plus the batching window, and keep the function timeout at or below the queue visibility timeout
+- A FIFO DLQ can break the exact order of a workflow; decide whether preserving order or isolating poison messages is more important
+- Monitor in-flight messages and verify the applicable FIFO quotas in Service Quotas for each Region and throughput mode
 
 ### When NOT to Use
 
 - Don't use when strict ordering isn't required — SQS Standard offers higher throughput
-- Don't use for high-volume events with many unique MessageGroupIds — ordering overhead degrades throughput
+- Don't use FIFO when ordering and producer-side deduplication are not required; many distinct `MessageGroupId` values increase available parallelism, while a small number of hot groups limits it
 
 ---
 
@@ -217,9 +206,12 @@ graph TB
     C2 -->|Poll| D2[Lambda<br/>Billing Worker]
     C3 -->|Poll| D3[Lambda<br/>Notification Worker]
     
-    D1 -->|Fail| E1[SQS DLQ<br/>fulfillment-dlq]
-    D2 -->|Fail| E2[SQS DLQ<br/>billing-dlq]
-    D3 -->|Fail| E3[SQS DLQ<br/>notification-dlq]
+    D1 -->|Failure, retry from queue| C1
+    D2 -->|Failure, retry from queue| C2
+    D3 -->|Failure, retry from queue| C3
+    C1 -->|SQS redrive| E1[SQS DLQ<br/>fulfillment-dlq]
+    C2 -->|SQS redrive| E2[SQS DLQ<br/>billing-dlq]
+    C3 -->|SQS redrive| E3[SQS DLQ<br/>notification-dlq]
 ```
 
 ### Why This Pattern?
@@ -247,7 +239,7 @@ Benefits of routing through per-consumer SQS queues instead of delivering direct
 }
 ```
 
-Note: Filter policies match against `MessageAttributes` set at publish time, not the message body.
+Note: Filter policies use `MessageAttributes` by default. Set `FilterPolicyScope=MessageBody` to filter a JSON message payload instead.
 
 ```json
 // Publish with matching MessageAttributes
@@ -271,14 +263,12 @@ graph TB
     A[Caller Lambda / API] -->|Async Invoke<br/>InvocationType: Event| B{Lambda Service}
     B -->|Queue| C[Internal Lambda Queue]
     C -->|Process| D[Target Lambda Function]
-    D -->|Success| E[(DynamoDB / S3)]
-    D -->|Failure| F{Retry Configured?}
-    F -->|Yes| G[Redrive Policy]
-    G -->|SQS DLQ| H[SQS Queue<br/>async-dlq]
-    G -->|EventBridge| I[EventBridge Event<br/>for reprocessing]
-    F -->|No| J[Event Destination]
-    J -->|Success| K[Success Destination]
-    J -->|Failure| L[Failure Destination]
+    D -->|Success| E[Optional OnSuccess destination<br/>SQS / SNS / Lambda / EventBridge]
+    D -->|Function error| C
+    C -->|Retries exhausted or event expires| F{Failure handling configured?}
+    F -->|OnFailure destination| G[SQS / SNS / Lambda / EventBridge<br/>or S3]
+    F -->|Dead-letter queue| H[Standard SQS queue<br/>or Standard SNS topic]
+    F -->|Neither| I[Event discarded]
 ```
 
 ### Why This Pattern?
@@ -295,15 +285,15 @@ Key parameters for controlling retries, event age, and success/failure routing o
 |---------|-------|---------|
 | `InvocationType` | `Event` | Fire-and-forget |
 | `Qualifier` | Alias/Version | Target specific version |
-| `DestinationConfig.OnSuccess` | SQS/EventBridge | Track successful invocations |
-| `DestinationConfig.OnFailure` | SQS/EventBridge | Handle failed invocations |
-| `MaximumRetryAttempts` | 0-2 | Lambda retries 2 and 5 minutes after failure, then sends to DLQ |
-| `MaximumEventAge` | 0-21600s | Discard old events |
+| `DestinationConfig.OnSuccess` | Standard SQS, Standard SNS, Lambda, or EventBridge | Route a record containing invocation details and the response |
+| `DestinationConfig.OnFailure` | Standard SQS, Standard SNS, Lambda, EventBridge, or S3 | Route a record after retries are exhausted or the event expires; S3 is failure-only |
+| `MaximumRetryAttempts` | 0-2 | For function errors, the default retries occur after approximately 1 minute and then 2 minutes; throttling/system errors use a separate exponential retry schedule |
+| `MaximumEventAge` | 60-21,600 seconds | Discard events that are too old to process |
 
 ### When NOT to Use
 
 - Don't use for requests requiring immediate response — use synchronous invocation
-- Don't use for payloads > 1 MB (current Lambda async invocation limit, raised from 256 KB in Oct 2025) — use SQS or SNS intermediary. Note SNS message size remains capped at 256 KB.
+- Don't use for payloads > 1 MB — store the payload in S3 and pass a reference. SNS remains capped at 256 KB and is not an intermediary for larger payloads.
 
 ---
 
@@ -314,9 +304,9 @@ Use for centralized event routing across AWS services and custom targets.
 ```mermaid
 graph TB
     subgraph "Event Producers"
-        A1[VPC Flow Logs] 
+        A1[EC2 state-change events]
         A2[S3 Bucket Events]
-        A3[CloudTrail]
+        A3[CloudTrail-backed API events]
         A4[Custom Application]
         A5[AWS Service Events]
     end
@@ -329,7 +319,8 @@ graph TB
     
     B -->|Rule: API errors| D[Lambda<br/>Alert Handler]
     B -->|Rule: S3 put| E[SQS Queue<br/>Image Processor]
-    B -->|Rule: CloudTrail| F[(OpenSearch<br/>Audit Logs)]
+    B -->|Rule: API audit events| F[Data Firehose]
+    F --> J[(S3 audit archive)]
     
     C -->|Rule: order.created| G[SNS Topic<br/>order-notifications]
     C -->|Rule: payment.completed| H[Lambda<br/>Receipt Generator]
@@ -338,23 +329,24 @@ graph TB
 
 ### Why This Pattern?
 
-As a system accumulates event producers (AWS services, custom apps) and consumers, hardcoding each producer-to-consumer relationship creates an N×M web of point-to-point integrations — every new consumer means changing producer code, and every producer needs to know about every consumer that cares about its events. EventBridge decouples this: producers publish once to a bus, and declarative rules (not producer code) decide which consumers receive which events based on event content. Consumers are added, removed, or rerouted by changing rules alone, and EventBridge's native integration with 200+ AWS services means many event sources need no custom producer code at all.
+As a system accumulates event producers (AWS services, custom apps) and consumers, hardcoding each producer-to-consumer relationship creates an N×M web of point-to-point integrations — every new consumer means changing producer code, and every producer needs to know about every consumer that cares about its events. EventBridge decouples this: producers publish once to a bus, and declarative rules (not producer code) decide which consumers receive which events based on event content. Consumers are added, removed, or rerouted by changing rules alone, and integrations with many AWS services mean many event sources need no custom producer code.
 
 **Trade-off:** the extra routing layer makes it harder to trace an event's full path end-to-end without tracing/observability tooling, and rule evaluation adds a small amount of latency versus a direct point-to-point call — not suitable when you need the lowest-latency, simplest possible producer-to-consumer link.
 
-### EventBridge Rule Types
+### EventBridge Rules and Archives
 
-The three ways an EventBridge rule can select and act on events.
+Rules select live events; archives are a separate event-bus capability used for later replay.
 
 | Rule Type | Match Strategy | Use Case |
 |-----------|---------------|----------|
 | **Event pattern** | JSON path matching | AWS service events |
-| **Schedule/Cron** | Time-based | Scheduled Lambda invocations |
-| **Event pattern + Archive** | Replay historical events | Debugging, reprocessing |
+| **Schedule** | Time-based | Prefer EventBridge Scheduler for new scheduled invocations; scheduled rules are a legacy option |
+
+Create an archive on an event bus to retain matching events, then start a replay to send archived events back to the source event bus. Replay is not a rule type.
 
 ### EventBridge Schema Registry
 
-Use Schema Registry for event contract management, validation, and SDK generation across services.
+Use Schema Registry to discover, catalog, and generate code bindings for event schemas. It does not validate or enforce schema compatibility for events at runtime; producers and consumers must implement that policy separately.
 
 ### When NOT to Use
 
@@ -363,30 +355,31 @@ Use Schema Registry for event contract management, validation, and SDK generatio
 
 ### EventBridge Pipes
 
-EventBridge Pipes connects sources (SQS, DynamoDB Streams, Kinesis, API Gateway) directly to destinations (Lambda, SQS, SNS, EventBridge, HTTP) without Lambda. Useful for simple routing without compute overhead.
+EventBridge Pipes connects supported polling or stream sources such as SQS, DynamoDB Streams, Kinesis, Kafka, and Amazon MQ to supported targets without routing code. Pipes can invoke HTTP endpoints through an EventBridge API Destination; API Gateway is not a pipe source.
 
 ### Cross-Region Event Routing
 
-EventBridge supports global endpoints for cross-region event replication, enabling multi-region event-driven architectures.
+EventBridge global endpoints can route events to a secondary Region during failover and support event replication between paired buses. Configure the endpoint with a Route 53 Application Recovery Controller health check and test the failover behavior; this is not an automatic active-active design.
 
 ---
 
 ## Pattern 7: Dead-Letter Queue (DLQ) Strategy
 
-Every event-driven system needs a DLQ strategy for poison pill handling.
+Every event-driven system needs an explicit terminal-failure strategy. Use a DLQ when failed events must be retained for inspection or later redrive.
 
 ```mermaid
 graph TB
     A[Primary SQS Queue] -->|Event Source Mapping| B[Lambda Processor]
     B -->|Process OK| C[(Database)]
-    B -->|Max Retries Exceeded| D[DLQ SQS Queue]
+    B -->|Failure, message becomes visible again| A
+    A -->|SQS redrive after maxReceiveCount| D[DLQ SQS Queue]
     D -->|Manual Review| E[Human Investigation]
     D -->|Automated Retry| F[Lambda<br/>DLQ Processor]
     F -->|Transform| G[Reprocess Queue]
     G -->|Retry| B
     
     subgraph "DLQ Configuration"
-        H[Max Receive Count: 3]
+        H[Workload-specific maxReceiveCount<br/>Lambda recommends at least 5]
         I[Redrive Allow Policy]
         J[Alarm on DLQ depth > 0]
     end
@@ -404,15 +397,15 @@ How dead-letter handling is wired up per event source.
 
 | Source | DLQ Target | Redrive Setting | Monitoring |
 |--------|-----------|-----------------|------------|
-| SQS → Lambda | SQS DLQ | `MaxReceiveCount` = 3 | CloudWatch Alarm |
-| SNS → Lambda | SQS DLQ | `MaximumRetryAttempts` = 3 | CloudWatch Alarm |
-| Async Lambda | SQS/EventBridge | `DestinationConfig.OnFailure` | CloudWatch Logs |
-| EventBridge | Archive + Rule | N/A | Management Events |
+| SQS → Lambda | SQS DLQ | Source queue `RedrivePolicy`; choose `maxReceiveCount` from retry behavior (Lambda recommends at least 5) | SQS age/depth alarms, including DLQ depth |
+| SNS → Lambda | SNS subscription redrive policy to SQS | SNS-managed delivery retry policy | CloudWatch Alarm on DLQ |
+| Async Lambda | OnFailure: Standard SQS, Standard SNS, Lambda, EventBridge, or S3; alternatively a Standard SQS/SNS DLQ | `DestinationConfig.OnFailure` or `DeadLetterConfig` | `DestinationDeliveryFailures`, function metrics, and destination metrics |
+| EventBridge | Same-Region Standard SQS DLQ for failed target delivery | Target `DeadLetterConfig`; archive/replay is separate | `InvocationsSentToDLQ`, `InvocationsFailedToBeSentToDLQ`, and DLQ depth |
 
 ### When NOT to Use DLQ
 
 - Don't use DLQ for expected errors — classify and handle in-code (see `03-error-handling-patterns.md`)
-- Don't use a single DLQ for all services — use per-service DLQs for easier diagnosis
+- Partition DLQs by owner, failure policy, and access boundary; unrelated workloads should not share a queue merely for convenience
 
 ---
 
@@ -423,8 +416,22 @@ Common mistakes in event-driven designs and the recommended fix for each.
 | Anti-Pattern | Problem | Solution |
 |-------------|---------|----------|
 | **Synchronous Lambda chaining** | Timeout cascades, cold starts multiply | Use SQS or SNS for decoupling |
-| **Large SQS batches** | Long Lambda execution, higher memory waste | Batch size 10-100, tune per workload |
-| **No DLQ** | Lost messages, silent failures | Always configure DLQ |
+| **Untuned SQS batches** | Long executions or poor throughput | Tune batch size/window from payload size, duration, and failure behavior |
+| **No failure destination** | Lost visibility into exhausted retries | Configure a DLQ or on-failure destination where the source supports it |
 | **Non-idempotent handlers** | Duplicate processing causes data corruption | Use idempotency keys, DynamoDB conditional writes |
-| **SNS direct to Lambda without DLQ** | Failed invocations are lost | Add SQS buffer or Lambda DLQ |
+| **SNS direct to Lambda without subscription DLQ** | Delivery failures are discarded after SNS exhausts retries | Add an SNS subscription DLQ or an SQS buffer |
 | **Tight coupling via direct API calls** | Single point of failure, no backpressure | Introduce message queue |
+
+## Authoritative References
+
+- [Amazon SNS features and functionality](https://docs.aws.amazon.com/sns/latest/dg/welcome-features.html)
+- [Amazon SNS message delivery retries](https://docs.aws.amazon.com/sns/latest/dg/sns-message-delivery-retries.html)
+- [Amazon SNS dead-letter queues](https://docs.aws.amazon.com/sns/latest/dg/sns-dead-letter-queues.html)
+- [Amazon SNS FIFO message archiving and replay](https://docs.aws.amazon.com/sns/latest/dg/fifo-message-archiving-replay.html)
+- [Using Lambda with Amazon SQS](https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html)
+- [Configuring SQS event source mappings](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html)
+- [Lambda asynchronous invocation destinations and dead-letter queues](https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-retain-records.html)
+- [Sending events with EventBridge PutEvents](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-putevents.html)
+- [EventBridge archives and replay](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-archive.html)
+- [EventBridge schemas](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-schema.html)
+- [EventBridge retry policies and dead-letter queues](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-retry-policy.html)

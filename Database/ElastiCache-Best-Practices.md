@@ -2,14 +2,14 @@
 
 ## Engine Selection
 
-> **Engine naming note:** Redis OSS forked into **Valkey** (Linux Foundation project) after Redis Inc. changed its licensing in 2024. Amazon ElastiCache now offers three engine options: **Valkey** (recommended for new workloads — actively developed, BSD-licensed, API-compatible with Redis OSS 7.2), **Redis OSS** (AWS supports up to the last BSD-licensed version, 7.1; available on a maintenance/extended-support track for existing workloads), and **Memcached**. New deployments should default to Valkey unless a specific Redis OSS-only feature or client compatibility issue requires otherwise.
+> **Engine naming note:** Amazon ElastiCache supports **Valkey**, **Redis OSS**, and **Memcached**. AWS recommends evaluating the newest supported engine release; current ElastiCache documentation includes Valkey 9.x while Redis OSS support ends at 7.1. Valkey is the normal default for new Redis-compatible workloads, but verify client and feature compatibility before migration.
 
 ### Valkey/Redis OSS vs Memcached
 
 | Feature | Valkey / Redis OSS | Memcached |
 |---------|-------|-----------|
 | **Data structures** | Strings, lists, sets, sorted sets, hashes, streams | Strings, binary blobs |
-| **Persistence** | RDB snapshots, AOF | None (ephemeral only) |
+| **Backup/durability options** | Managed snapshots for node-based caches; newer Valkey versions also offer documented durability features with specific constraints | Node-based Memcached is ephemeral; serverless backup support differs |
 | **High Availability** | Multi-AZ with automatic failover | No built-in HA |
 | **Clustering** | Sharding with replication | Sharding only |
 | **Serverless option** | Yes (ElastiCache Serverless) | Yes (ElastiCache Serverless) |
@@ -24,7 +24,7 @@
 
 | Use Case | Recommended Engine | Reason |
 |----------|-------------------|--------|
-| Session store | Valkey / Redis OSS | Persistence, replication |
+| Session store | Valkey / Redis OSS | Replication, TTLs, and access controls; still design for documented failover/data-loss behavior |
 | Leaderboard | Valkey / Redis OSS | Sorted sets |
 | Simple caching | Either | Memcached simpler, Valkey more features |
 | Message queue | Valkey / Redis OSS | Streams, pub/sub |
@@ -32,7 +32,7 @@
 | Geospatial | Valkey / Redis OSS | Geospatial commands |
 | Rate limiting | Valkey / Redis OSS | Atomic operations, sorted sets |
 | High-throughput cache | Memcached | Simpler, multi-threaded |
-| Unpredictable/spiky workloads | ElastiCache Serverless (Valkey, Redis OSS, or Memcached) | No capacity planning, scales automatically |
+| Unpredictable/spiky workloads | ElastiCache Serverless (Valkey, Redis OSS, or Memcached) | Removes node/shard planning and scales automatically; still size quotas, maximum data, ECPU controls, and cost expectations |
 
 ---
 
@@ -50,16 +50,16 @@
 | cache.r7g.xlarge | Graviton 3 | 4 | ~26 GiB | Next-gen memory |
 | cache.r7g.4xlarge | Graviton 3 | 16 | ~106 GiB | Very large workloads |
 
-> Exact usable memory per node type is reserved/adjusted by ElastiCache and can change — verify current values in the [ElastiCache node type documentation](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/CacheNodes.SupportedTypes.html) before capacity planning. For variable or hard-to-predict workloads, consider **ElastiCache Serverless** instead of manually selecting node types.
+> Exact usable memory and supported node types vary by engine, version, and Region. Verify current values in the [ElastiCache node type documentation](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/CacheNodes.SupportedTypes.html) before capacity planning. For variable or hard-to-predict workloads, consider **ElastiCache Serverless** instead of manually selecting node types.
 
 ### Sizing Guidelines
 
 | Metric | Calculation | Recommendation |
 |--------|-------------|----------------|
-| **Dataset size** | Working set that fits in memory | Target 70-80% memory utilization |
+| **Dataset size** | Working set plus replication, fragmentation, buffers, and backup/failover headroom | Alarm on `DatabaseMemoryUsagePercentage`, evictions, and `FreeableMemory`; validate with load tests rather than a universal percentage |
 | **Network capacity** | Requests/sec x avg payload | Monitor NetworkIn/NetworkOut |
-| **CPU utilization** | Complex operations, serialization | Keep below 70% |
-| **Connections** | Max connections per node | Monitor ConnectedOperations |
+| **CPU utilization** | Commands, data structures, and serialization | Monitor `EngineCPUUtilization` for Valkey/Redis OSS and host `CPUUtilization`; set workload-specific SLO thresholds |
+| **Connections** | Clients, pools, and reconnect storms | Monitor `CurrConnections`, new connections, rejected connections, and documented node limits |
 
 ---
 
@@ -76,7 +76,7 @@
 
 ```mermaid
 graph TB
-    subgraph "Redis Cluster"
+    subgraph "Valkey or Redis OSS cluster"
       subgraph "Shard 1 (Slots 0-5460)"
         P1["Primary Node 1"]
         R1["Replica Node 1"]
@@ -109,16 +109,16 @@ graph TB
 | Feature | Description |
 |---------|-------------|
 | **Shards (Nodes Groups)** | Independent partitions of data |
-| **Automatic resharding** | Add/remove shards without downtime |
+| **Online resharding** | Add/remove shards while serving traffic on supported versions; test latency and capacity impact |
 | **Cross-slot operations** | Not supported (design keys carefully) |
 | **Hash tags** | Force related keys to same slot |
-| **Max shards** | Up to 500 per cluster (default quota 90; requires Valkey 7.2+ or Redis OSS 5.0.6+ for the higher limit) |
+| **Node/shard quota** | Default: 90 nodes per cluster-mode-enabled cluster. An approved increase can allow up to 500 total nodes or 500 shards (with no replicas) on supported Valkey/Redis OSS versions; replicas reduce the possible shard count |
 
 ### Multi-AZ Configuration
 
 | Setting | Description | Recommendation |
 |---------|-------------|----------------|
-| **Auto-failover** | Enable for HA | Always enable in production |
+| **Auto-failover** | Promote a replica after primary failure | Enable for production workloads that require HA; cluster mode enabled requires it |
 | **Number of replicas** | 1-5 per shard | Minimum 1 for HA |
 | **Availability zones** | Automatic placement | Spread across AZs |
 | **Preferred maintenance window** | Patching window | Low-traffic period |
@@ -131,12 +131,10 @@ graph TB
 
 | Parameter | Description | Recommendation |
 |-----------|-------------|----------------|
-| maxmemory-policy | Eviction policy | allkeys-lru for caches, noeviction for sessions |
-| maxmemory | Memory limit | Set to 70-80% of node memory |
-| timeout | Client connection timeout | 300 seconds |
-| tcp-keepalive | Keep-alive interval | 300 seconds |
-| hz | Redis background tasks frequency | 10 (default), increase for faster cleanup |
-| activedefrag | Active defragmentation | Enable for large datasets |
+| `maxmemory-policy` | Eviction policy | Choose from workload semantics: an all-keys policy for a rebuildable cache, or `noeviction` only when callers correctly handle OOM errors; serverless uses service-defined settings |
+| `reserved-memory-percent` / available memory | Service and engine overhead | Do not set `maxmemory` from total node RAM. Use ElastiCache-supported parameters and memory metrics for the selected engine/version |
+| `timeout` and keepalive | Idle client handling and failure detection | Tune client and server behavior together; defaults differ between node-based and serverless caches |
+| Active defragmentation | Memory fragmentation | Validate supported parameters and engine behavior; newer versions may let ElastiCache defragment automatically when operationally necessary |
 
 ### Connection Management
 
@@ -152,33 +150,24 @@ graph TB
 
 | Factor | Impact | Mitigation |
 |--------|--------|------------|
-| **Network distance** | Higher latency | Place in same AZ as application |
+| **Network distance** | Higher latency | Keep clients in the same Region, spread clients/caches for HA, and measure the latency/cross-AZ-cost tradeoff rather than forcing every client into one AZ |
 | **Large values** | Higher serialization time | Compress, chunk large values |
 | **Complex operations** | CPU-bound | Simplify data structures |
 | **Eviction** | Memory pressure | Right-size, tune eviction policy |
-| **AOF rewrite** | I/O spike | Schedule during low traffic |
+| **Snapshots, resharding, failover** | Resource pressure or reconnect spike | Preserve headroom, use backoff/jitter, and test maintenance and failure events |
 
 ---
 
-## Persistence
+## Backup and Durability
 
-### Valkey/Redis OSS Persistence Options
+ElastiCache is primarily a cache, not a system of record. Node-based Valkey/Redis OSS supports managed snapshots and restore into a new cache. Replication and Multi-AZ reduce downtime but do not by themselves provide a zero-data-loss guarantee. Do not describe ElastiCache as offering user-managed RDB+AOF durability: persistence controls and availability depend on the ElastiCache engine/version, and serverless parameters are service-managed.
 
-| Method | RPO | Performance Impact | Use Case |
-|--------|-----|-------------------|----------|
-| **RDB (snapshot)** | Last snapshot | Fork overhead | Point-in-time recovery |
-| **AOF (append-only file)** | Last write (everysec) | Disk I/O on writes | Minimal data loss |
-| **Both RDB + AOF** | Last write | Combined overhead | Maximum durability |
-| **None** | None | None | Ephemeral cache only |
-
-### Persistence Recommendations
-
-| Scenario | RDB | AOF | Reason |
-|----------|-----|-----|--------|
-| **Cache (data can be rebuilt)** | Disabled | Disabled | No persistence needed |
-| **Session store** | Enabled (hourly) | Enabled (everysec) | Balance durability and performance |
-| **Critical data** | Enabled (frequent) | Enabled (everysec) | Maximum durability |
-| **Leaderboard** | Enabled (daily) | Disabled | Accept some data loss |
+| Requirement | Guidance |
+|-------------|----------|
+| Rebuildable cache | Treat the source database/object store as authoritative; test cache warm-up and stampede protection |
+| Sessions or other state | Define acceptable RPO, enable supported backups/replication, and test failover plus restore. Consider a durable database if losing acknowledged writes is unacceptable |
+| Zero-data-loss failover | Evaluate the documented Multi-AZ transactional-log durability available in supported newer Valkey versions, including its Region/version and Global Datastore constraints |
+| Cross-Region recovery | Global Datastore replication is asynchronous; monitor lag and run planned/unplanned failover exercises |
 
 ---
 
@@ -191,21 +180,20 @@ graph TB
 | **VPC placement** | Private subnets only | CRITICAL |
 | **Encryption at rest** | Enable with KMS | CRITICAL |
 | **Encryption in transit** | TLS/SSL required | HIGH |
-| **Auth token** | Set Valkey/Redis AUTH token (or use RBAC users) | HIGH |
+| **Authentication and authorization** | Prefer RBAC user groups; all serverless caches require RBAC. IAM authentication is supported for compatible Valkey/Redis OSS versions and requires TLS | HIGH |
 | **Security groups** | Restrict to application SGs | HIGH |
 | **Parameter group** | Disable dangerous commands | MEDIUM |
-| **IAM auth** | Use IAM for ElastiCache API | MEDIUM |
-| **Transit encryption** | Auth-enabled for TLS | HIGH |
+| **IAM control plane** | Use IAM least privilege for ElastiCache API operations | MEDIUM |
 
 ### Dangerous Commands to Disable
 
 | Command | Risk | Action |
 |---------|------|--------|
-| FLUSHDB | Delete all keys in database | Disable in parameter group |
-| FLUSHALL | Delete all keys in all databases | Disable in parameter group |
-| KEYS | Block server during execution | Disable, use SCAN instead |
-| DEBUG | Debug commands | Disable in production |
-| CONFIG | Modify runtime config | Disable in production |
+| FLUSHDB | Delete all keys in database | Deny with RBAC ACLs and, for supported node-based versions, block/rename in a custom parameter group |
+| FLUSHALL | Delete all keys in all databases | Deny with RBAC ACLs and, for supported node-based versions, block/rename in a custom parameter group |
+| KEYS | Can block the engine over a large keyspace | Deny for application users; use cursor-based `SCAN` where appropriate |
+| DEBUG | Administrative/debug operations | Deny for application users |
+| CONFIG | Runtime configuration access | Deny for application users; manage supported settings through ElastiCache parameter groups |
 
 ---
 
@@ -215,25 +203,17 @@ graph TB
 
 | Metric | Warning | Critical | Description |
 |--------|---------|----------|-------------|
-| CurrConnections | > 70% max | > 90% max | Active connections |
-| FreeableMemory | < 20% | < 10% | Available memory |
-| UsedMemoryBytes | > 70% max | > 85% max | Memory utilization |
-| CPUUtilization | > 70% | > 90% | CPU usage |
-| GetHitRate (Memcached) / CacheHits (Redis) | < 80% | < 50% | Cache hit ratio (metric name varies by engine) |
-| GetLatencyUs | > 1,000 us | > 5,000 us | Read latency |
-| SetLatencyUs | > 1,000 us | > 5,000 us | Write latency |
-| NetworkOut | Baseline + 2σ | Baseline + 3σ | Outbound traffic |
-| ReplicationLag | > 1 sec | > 10 sec | Replica lag (Redis) |
-| SwapUsage | > 0 | > 10% | Swap usage (bad sign) |
+| `CurrConnections`, `NewConnections` | Baseline deviation | Approaching documented limit or reconnect storm | Active/new connections |
+| `DatabaseMemoryUsagePercentage`, `FreeableMemory` | Reduced headroom | Evictions, OOM risk, or workload SLO impact | Engine and host memory pressure |
+| `EngineCPUUtilization`, `CPUUtilization` | Baseline/SLO deviation | Sustained saturation | Engine thread and host CPU |
+| `CacheHits`, `CacheMisses` | Hit ratio below workload target | Source-store overload or latency SLO impact | Derive hit ratio; do not use a universal percentage |
+| Command latency metrics such as `GetTypeCmdsLatency` / `SetTypeCmdsLatency` | Baseline deviation | Latency SLO impact | Use engine-appropriate metric names and units |
+| `ReplicationLag` | Above tested recovery/failover tolerance | RPO or failover objective at risk | Replica lag for Valkey/Redis OSS |
+| `Evictions`, `SwapUsage` | Unexpected non-zero or trend | Sustained data churn/performance impact | Memory pressure indicators |
 
 ### Cache Hit Rate Analysis
 
-| Hit Rate | Assessment | Action |
-|----------|-----------|--------|
-| > 95% | Excellent | Optimal cache usage |
-| 80-95% | Good | Monitor for trends |
-| 50-80% | Fair | Review cache strategy, TTLs |
-| < 50% | Poor | Cache thrashing, review architecture |
+There is no service-wide "good" cache-hit ratio. Establish a target from source-load reduction, end-to-end latency, object popularity, negative caching, and freshness requirements. Segment hits/misses by operation and key family; a high ratio can still hide a hot miss path or stale-data problem.
 
 ---
 
@@ -241,10 +221,10 @@ graph TB
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
-| **Right-sizing** | Match node type to workload | 20-50% |
-| **Reserved Nodes** | 1 or 3-year commitment | Up to 70% |
-| **Savings Plans** | Compute commitment | Up to 65% |
-| **Graviton nodes** | ARM-based instances | 20% better price/performance |
+| **Right-sizing** | Match node type, shard count, replicas, and headroom to workload | Workload-dependent |
+| **Reserved Nodes** | 1 or 3-year node commitment where an offering matches stable usage | Compare current offering and utilization |
+| **Database Savings Plans** | Spend commitment that can apply to eligible ElastiCache and other database usage | Up to 35% according to current Savings Plans documentation; model overlap with reservations |
+| **Graviton nodes** | Benchmark supported ARM-based node families | Compare current price/performance for the workload |
 | **Choose Valkey over Redis OSS** | Valkey pricing is lower than other supported engines for equivalent nodes/Serverless | Lower per-node and Serverless cost |
 | **Reduce replicas** | Minimum needed for HA | Per-node cost |
 | **Tuning hit rate** | Higher hit rate = fewer source queries | Indirect DB cost savings |
@@ -269,9 +249,9 @@ graph TB
 
 | Step | Action | Description |
 |------|--------|-------------|
-| 1 | Write to cache | SET key in ElastiCache |
-| 2 | Write to database | Persist to source of truth |
-| 3 | Return result | Confirm write success |
+| 1 | Write source of truth | Commit the durable database write |
+| 2 | Update or invalidate cache | Apply a versioned/idempotent cache update only after the durable commit, or use a transactional outbox/change stream |
+| 3 | Return result | Define failure handling so cache and source cannot silently diverge |
 
 ### Pattern Comparison
 
@@ -292,8 +272,8 @@ graph TB
       A5 --> A6["Return Value"]
     end
     subgraph "Write-Through"
-      W1["Application"] --> W2["Write to Cache"]
-      W2 --> W3["Write to Database"]
+      W1["Application"] --> W2["Commit Source of Truth"]
+      W2 --> W3["Update or Invalidate Cache"]
       W3 --> W4["Confirm Success"]
     end
     subgraph "Write-Behind"
@@ -326,5 +306,16 @@ graph TB
 
 | Feature | Description |
 |---------|-------------|
-| **Global Datastore** | Cross-region replication for Valkey/Redis OSS clusters; near-real-time, asynchronous replication for disaster recovery and low-latency global reads |
-| **ElastiCache Serverless** | On-demand capacity (compute + memory) that scales automatically per workload; supports Valkey, Redis OSS, and Memcached; no node/shard sizing required |
+| **Global Datastore** | Asynchronous cross-Region replication for supported node-based Valkey/Redis OSS clusters. It supports one primary and up to two secondary Regions, requires the same account, and does not make RPO zero; test failover and monitor lag |
+| **ElastiCache Serverless** | Automatically scales compute and data storage for Valkey, Redis OSS, or Memcached; uses TLS and engine-specific serverless limits/settings, so verify client compatibility and quotas |
+
+---
+
+## Authoritative references
+
+- [Choosing an ElastiCache engine](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/SelectEngine.html)
+- [ElastiCache engine versions](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/engine-versions.html)
+- [Working with shards and quotas](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Shards.html)
+- [Valkey and Redis OSS configuration and limits](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/RedisConfiguration.html)
+- [ElastiCache IAM authentication](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/auth-iam.html)
+- [Global Datastore prerequisites and limitations](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Redis-Global-Datastores-Getting-Started.html)

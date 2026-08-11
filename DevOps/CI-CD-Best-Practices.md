@@ -6,10 +6,10 @@
 
 | Stage | Action | Description |
 |-------|--------|-------------|
-| **Source** | CodeCommit, CodeConnections (formerly CodeStar Connections), S3, GitHub | Code repository connection |
+| **Source** | CodeCommit, S3, ECR, or CodeConnections for GitHub/GitLab/Bitbucket | Source revision or image |
 | **Build** | CodeBuild | Compile, test, package |
 | **Test** | CodeBuild, AWS Device Farm, third-party tools | Automated testing |
-| **Deploy** | CodeDeploy, ECS, Lambda, S3 | Application deployment |
+| **Deploy** | CodeDeploy, ECS, CloudFormation, Elastic Beanstalk, S3, or third-party deploy actions | Application/infrastructure deployment |
 | **Approve** | Manual approval | Human gate before production |
 
 ```mermaid
@@ -17,14 +17,13 @@ graph LR
     A[Source<br/>CodeCommit/GitHub/S3] --> B[Build<br/>CodeBuild]
     B --> C[Test<br/>Unit/Integration/E2E]
     C --> D{Tests Pass?}
-    D -->|Yes| E[Deploy<br/>CodeDeploy/ECS/Lambda]
+    D -->|Yes| E[Deploy to Staging]
     D -->|No| F[Fail & Notify]
-    E --> G{Approve?}
-    G -->|Production| H[Manual Approval]
-    H --> I[Production]
-    G -->|Staging/Dev| I2[Staging/Dev]
+    E --> G[Integration and Smoke Tests]
+    G --> H{Production Approved?}
+    H -->|Yes| I[Deploy to Production]
+    H -->|No| I2[Stop Promotion]
     I --> J[Monitor<br/>CloudWatch]
-    I2 --> J
     J --> K{Issues?}
     K -->|Yes| L[Rollback]
     K -->|No| M[Success]
@@ -49,14 +48,14 @@ graph LR
 | **Image** | Managed image matching runtime | Pre-configured tools |
 | **Compute type** | Match build complexity | Cost vs speed |
 | **Timeout** | Minimum needed | Cost optimization |
-| **Environment variables** | Use Parameter Store for secrets | Security |
+| **Environment variables** | Use CodeBuild `secrets-manager` or `parameter-store` mappings; never store plaintext secrets in the project or buildspec | Security |
 | **Cache** | Enable dependency caching | Build speed |
 | **Logs** | CloudWatch Logs | Build visibility |
 
 ### Build Spec Best Practices
 
-| Practice | Description |
-|----------|-------------|
+| Practice | Implementation | Benefit |
+|----------|----------------|---------|
 | **Phased build** | install, pre_build, build, post_build | Organized build (no reports phase) |
 | **Cache dependencies** | npm, pip, maven cache | Faster builds |
 | **Parallel tests** | Split test suites | Faster feedback |
@@ -71,12 +70,11 @@ graph LR
 
 | Strategy | Downtime | Risk | Rollback | Use Case |
 |----------|----------|------|----------|----------|
-| **In-Place** | Partial | Medium | Automatic | EC2, On-premises |
-| **Blue/Green** | Zero | Low | Automatic (traffic swap) | EC2, Lambda (CodeDeploy) |
-| **Canary** | None | Low | Automatic | Lambda, ECS |
-| **All-at-Once** | Brief | High | Manual | Non-critical |
-| **Rolling** | Partial | Medium | Automatic | Large fleets |
-| **Rolling with Time** | Partial | Medium | Automatic | Controlled pace |
+| **EC2/on-premises in-place** | Depends on minimum healthy hosts | Medium | Optional automatic rollback | Update existing instances |
+| **EC2/on-premises blue/green** | Can avoid downtime with a load balancer | Lower blast radius | Optional automatic rollback | Replacement instances or Auto Scaling group |
+| **Lambda/ECS canary** | No planned downtime | Low initial blast radius | Alarm-driven automatic rollback when configured | Shift one percentage, wait, then shift the remainder |
+| **Lambda/ECS linear** | No planned downtime | Gradual blast radius | Alarm-driven automatic rollback when configured | Equal increments at fixed intervals |
+| **Lambda/ECS all-at-once** | No planned downtime, but immediate full exposure | Highest blast radius | Alarm-driven automatic rollback when configured | Fast deployment |
 
 ### Blue/Green Deployment
 
@@ -93,11 +91,11 @@ graph LR
 
 | Setting | Recommendation |
 |---------|---------------|
-| **Percentage** | Start at 5-10% |
-| **Interval** | 5-10 minute intervals |
-| **Failure threshold** | Automatic rollback on errors |
+| **Percentage** | Choose from a predefined or custom CodeDeploy configuration based on acceptable blast radius |
+| **Interval** | Long enough to observe representative traffic and alarm evaluation periods |
+| **Failure threshold** | Configure deployment-group CloudWatch alarms and automatic rollback |
 | **Metrics** | CloudWatch alarms for rollback criteria |
-| **Duration** | 30-60 minutes total canary period |
+| **Duration** | Match traffic volume and the time needed to detect regressions |
 
 ```mermaid
 graph TB
@@ -112,12 +110,9 @@ graph TB
     subgraph Canary["Canary Deployment"]
         direction LR
         C1[Current v1.0<br/>100% Traffic] --> C2[Deploy Canary<br/>v2.0 at 10%]
-        C2 --> C3{Metrics OK?}
-        C3 -->|Yes| C4[Increase to 50%]
-        C4 --> C5{Metrics OK?}
-        C5 -->|Yes| C6[Increase to 100%]
-        C5 -->|No| C7[Rollback to v1.0]
-        C3 -->|No| C7
+        C2 --> C3{Metrics OK<br/>after interval?}
+        C3 -->|Yes| C6[Shift remaining 90%<br/>v2.0 at 100%]
+        C3 -->|No| C7[Rollback to v1.0]
     end
 ```
 
@@ -137,8 +132,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 
 ### Parameter Store Integration
 
-| Parameter Type | Use Case | Example |
-|---------------|----------|---------|
+| Entry/organization | Use Case | Example |
+|--------------------|----------|---------|
 | **String** | Configuration values | DB endpoint, API URLs |
 | **StringList** | Multiple values | Allowed origins, IPs |
 | **SecureString** | Secrets | Passwords, API keys |
@@ -161,10 +156,10 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 
 | Control | Implementation |
 |---------|---------------|
-| **Secrets management** | Secrets Manager, not environment variables |
+| **Secrets management** | Secrets Manager or Parameter Store secret references; never plaintext pipeline/build environment variables |
 | **IAM roles** | Least privilege for pipeline roles |
-| **Scan for vulnerabilities** | Inspector, Snyk, Checkov |
-| **Container scanning** | ECR scan before deployment |
+| **Scan for vulnerabilities** | Dependency/SAST tooling in the build; Amazon Inspector for supported ECR images and deployed compute |
+| **Container scanning** | Push immutable images to ECR, evaluate scan findings, and promote by digest |
 | **Infrastructure scanning** | Checkov, cfn-nag for IaC |
 | **Approval gates** | Manual approval for production |
 | **Audit trail** | CloudTrail for pipeline actions |
@@ -190,7 +185,7 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 | **Integration tests** | Test containers, localstack | Every build | Minutes |
 | **E2E tests** | Selenium, Cypress | Every staging deploy | Minutes |
 | **Performance tests** | k6, JMeter | Before production | Hours |
-| **Security tests** | Inspector, Snyk | Every build | Minutes |
+| **Security tests** | SAST/dependency/IaC scanners; Inspector evaluates supported ECR/deployed resources | Every build plus continuous/post-push scanning | Varies |
 
 ### Test Automation
 
@@ -199,7 +194,7 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 | Unit tests | Build | Fail pipeline |
 | Integration tests | Build/Test | Fail pipeline |
 | Linting | Build | Fail pipeline |
-| Security scan | Build | Warn or fail |
+| Security scan | Build/Promotion | Fail on an explicitly defined severity and exception policy |
 | E2E tests | Post-deploy (staging) | Fail pipeline |
 | Smoke tests | Post-deploy (prod) | Trigger rollback |
 
@@ -213,9 +208,9 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 |--------|-------------|----------------|
 | Pipeline execution time | Total duration | > baseline + 2 sigma |
 | Build duration | Build stage time | > baseline + 2 sigma |
-| Test failure rate | Failed tests / total | > 5% |
-| Deployment success rate | Successful / total | < 95% |
-| Rollback frequency | Rollbacks / deployments | > 10% |
+| Test failure rate | Failed tests / total | Significant baseline change or quality objective breach |
+| Deployment success rate | Successful / total | Team reliability objective breach |
+| Rollback frequency | Rollbacks / deployments | Trend or release-quality objective breach |
 | Pipeline failures | Failed executions | Any |
 
 ---
@@ -224,8 +219,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
-| **Right-size build instances** | Match to build needs | 20-50% |
-| **Enable caching** | Dependency caching | 30-70% build time |
+| **Right-size build instances** | Match CPU, memory, and architecture to measured build needs | Lower compute cost |
+| **Enable caching** | Cache safe, reusable dependencies; invalidate keys when lockfiles change | Shorter build time |
 | **Parallel builds** | Multiple builds concurrently | Time savings |
 | **Cleanup artifacts** | Lifecycle policies on S3 | Storage reduction |
 | **Scheduled builds** | Only build when needed | Build cost reduction |
@@ -247,3 +242,20 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 | SNS | Notifications | Alerts |
 | Lambda | Custom actions | Extensibility |
 | ECS/EKS | Container deployment | Container orchestration |
+
+---
+
+## Additional Best Practices
+
+- Use separate artifact, deployment, and administration roles; restrict `iam:PassRole` to the exact service roles each pipeline needs.
+- Encrypt artifact stores, block public access, enable versioning where rollback depends on prior artifacts, and apply lifecycle policies.
+- Make artifacts immutable and promote the same tested artifact between environments instead of rebuilding it.
+- Prefer short-lived identity federation for external CI systems and pin third-party actions and dependencies.
+- Add deployment timeouts, rollback criteria, and post-deployment verification as code. A manual approval is an authorization gate, not a substitute for automated tests.
+
+## AWS References
+
+- [Valid action providers in CodePipeline](https://docs.aws.amazon.com/codepipeline/latest/userguide/actions-valid-providers.html)
+- [CodeBuild buildspec reference](https://docs.aws.amazon.com/codebuild/latest/userguide/build-spec-ref.html)
+- [CodeDeploy deployment configurations](https://docs.aws.amazon.com/codedeploy/latest/userguide/deployment-configurations.html)
+- [Configure automatic rollbacks for CodeDeploy](https://docs.aws.amazon.com/codedeploy/latest/userguide/deployments-rollback-and-redeploy.html)

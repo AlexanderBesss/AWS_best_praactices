@@ -8,18 +8,26 @@
 |-------|-----------|----------|-------------|----------|
 | **On-Demand** | None | 0% | Full | Short-term, unpredictable |
 | **Savings Plans (Compute)** | 1 or 3 years | Up to 66% | High | Any EC2/Fargate/Lambda |
-| **Savings Plans (EC2)** | 1 or 3 years | Up to 72% | Medium | Specific instance family |
-| **Reserved Instances** | 1 or 3 years | Up to 72% | Low | Specific instance type |
+| **EC2 Instance Savings Plans** | 1 or 3 years | Up to 72% | Medium | Specific instance family in one Region |
+| **Savings Plans (Database)** | 1 or 3 years | Up to 35% | High across eligible database usage | Aurora, RDS, DynamoDB, ElastiCache, DocumentDB, Neptune, Keyspaces, Timestream, DMS, and OpenSearch Service eligibility as documented |
+| **Savings Plans (SageMaker AI)** | 1 or 3 years | Up to 64% | High within eligible SageMaker AI usage | Steady SageMaker AI compute usage |
+| **EC2 Reserved Instances** | 1 or 3 years | Up to 72% | Attribute-bound; some Regional Linux/Unix shared-tenancy RIs have instance-size flexibility | Stable EC2 usage matching the RI's Region, platform, tenancy, family, and other applicable attributes |
 | **Spot Instances** | None | Up to 90% | Low | Fault-tolerant, flexible |
-| **Dedicated Hosts** | 1 or 3 years | Up to 60% | Low | Compliance, licensing |
+| **Dedicated Hosts** | On-Demand or reservation options | Low | Dedicated physical server | Licensing, tenancy, or compliance requirements; verify eligible discounts and dedicated fees |
 
 ```mermaid
-xychart-beta
-    title "Compute Pricing Models — Discount vs Flexibility"
-    x-axis ["On-Demand", "Savings Plans\n(Compute)", "Savings Plans\n(EC2)", "Reserved\nInstances", "Spot\nInstances"]
-    y-axis "Discount %" 0 --> 95
-    bar [0, 66, 72, 72, 90]
-    line [100, 80, 60, 40, 20]
+flowchart TD
+    A[Measure hourly eligible usage] --> B{Can the workload tolerate interruption?}
+    B -->|Yes| C[Model Spot with diversification and fallback]
+    B -->|No| D{Is there a stable spend floor?}
+    D -->|No| E[Keep On-Demand and remeasure]
+    D -->|Yes| F{Which scope must remain flexible?}
+    F -->|EC2 family and Region fixed| G[EC2 Instance Savings Plan or matching RI]
+    F -->|EC2, Fargate, and Lambda| H[Compute Savings Plan]
+    F -->|Eligible database services| I[Database Savings Plan or service reservation]
+    G --> J[Model coverage and utilization before purchase]
+    H --> J
+    I --> J
 ```
 
 ### Graviton (ARM-Based) Instances
@@ -27,22 +35,14 @@ xychart-beta
 | Aspect | Detail |
 |--------|--------|
 | **Price-performance gain** | Up to 40% better price-performance vs. comparable current-gen x86 instances |
-| **Direct cost savings** | ~20% lower on-demand price for equivalent instance size (e.g., c6g vs c5) |
+| **Direct cost savings** | Family, generation, Region, and software dependent; benchmark current On-Demand rates and throughput rather than assuming equal sizes are equivalent |
 | **Supported services** | EC2, RDS, ElastiCache, OpenSearch Service, EMR, Lambda (arm64) |
 | **Stacks with** | Savings Plans, Reserved Instances, and Spot for compounded savings |
 | **Migration effort** | Low for interpreted/managed runtimes (Lambda, Java, Python, Node.js); recompilation needed for native binaries |
 
 ### Storage Pricing
 
-| Service | On-Demand | Reserved/Savings | Spot |
-|---------|-----------|-----------------|------|
-| EBS gp3 | $0.08/GB/mo | $0.08/GB/mo | N/A |
-| EBS io2 | $0.125/GB/mo | $0.125/GB/mo | N/A |
-| S3 Standard | $0.023/GB/mo | N/A | N/A |
-| S3 IA | $0.0125/GB/mo | N/A | N/A |
-| S3 Glacier Flexible | $0.0036/GB/mo | N/A | N/A |
-| EFS Standard | $0.30/GB/mo | N/A | N/A |
-| EFS One Zone | $0.10/GB/mo | N/A | N/A |
+Storage cannot be compared on a per-GB rate alone. Model capacity, IOPS/throughput, requests, minimum storage duration, retrieval, object metadata, snapshots/backups, replication, and data transfer for the deployment Region. Use the [AWS Pricing Calculator](https://calculator.aws/) and current service pricing pages; rates in examples become stale and differ by Region and tier.
 
 ---
 
@@ -61,33 +61,28 @@ xychart-beta
 
 ```mermaid
 flowchart TD
-    A["Start: Collect 14-30 days\nof CloudWatch metrics"] --> B{"CPU < 25%\nsustained?"}
-    B -->|Yes| C["Over-provisioned"]
-    B -->|No| D{"CPU > 80%\nsustained?"}
-    D -->|Yes| E["Under-provisioned"]
-    D -->|No| F["Right-sized ✓"]
-    C --> G["Downsize to next\nsmaller instance"]
-    E --> H["Upsize to next\nlarger instance"]
-    G --> I["Test in non-prod"]
-    H --> I
-    I --> J{"Meets SLA?"}
+    A["Collect representative metrics\nand business-cycle peaks"] --> B{"Compute Optimizer recommendation\nand workload SLO evidence?"}
+    B -->|Over-provisioned| C["Model smaller or different family"]
+    B -->|Performance risk| D["Model larger, faster, or scaled-out design"]
+    B -->|No material opportunity| F["Keep and remeasure"]
+    C --> I["Test CPU, memory, network, storage,\nlatency, licensing, and resilience"]
+    D --> I
+    I --> J{"Meets workload SLO and resilience requirements?"}
     J -->|Yes| K["Deploy via\nchange management"]
     J -->|No| L["Re-evaluate size\nor architecture"]
     K --> M["Monitor post-change\nwith CloudWatch"]
-    L --> G
+    L --> B
 ```
 
 ### Right-Sizing by Service
 
 | Service | Metric | Over-Provisioned | Under-Provisioned |
 |---------|--------|-----------------|-------------------|
-| EC2 | CPUUtilization | < 25% sustained | > 80% sustained |
-| RDS | CPUUtilization | < 25% sustained | > 80% sustained |
-| RDS | FreeableMemory | > 80% | < 10% |
-| Lambda | Duration vs Timeout | Timeout > 5x duration | Timeout < 1.2x duration |
-| Lambda | Memory vs Utilization | Memory > 2x needed | Memory < needed |
-| EBS | VolumeReadOps/WriteOps, BurstBalance | < 30% of provisioned | > 80% of provisioned |
-| DynamoDB | Read/Write Capacity | < 30% utilized | > 80% utilized |
+| EC2 | CPU, memory agent metrics, network/EBS throughput, latency, queue depth, credits, licenses | Resources remain idle through representative peaks | SLO breaches, saturation, throttling, or insufficient burst headroom |
+| RDS | DB load/waits, CPU, memory/swap, connections, latency/queue depth, storage/I/O | Low load with excess instance/storage capacity after failover headroom | Query/lock bottleneck or sustained resource pressure; fix queries before blindly scaling |
+| Lambda | Duration, errors/throttles, `MaxMemoryUsed`, concurrency, cold starts, cost per transaction | Lower memory or architecture improves tested cost without hurting SLO | More memory can also add CPU and reduce duration; use Lambda Power Tuning or equivalent testing |
+| EBS | IOPS, throughput, latency, queue length, burst balance, instance EBS limits | Provisioned performance materially exceeds measured need | Approaching volume or instance limits, rising latency, or credit exhaustion |
+| DynamoDB | Consumed capacity, throttles, latency, warm/maximum throughput, table class | Provisioned capacity remains unused after auto-scaling design | Throttles/SLO impact, hot keys, or reactive scaling that cannot absorb peaks |
 
 ---
 
@@ -97,17 +92,17 @@ flowchart TD
 
 | Metric | Target | Current | Action |
 |--------|--------|---------|--------|
-| **Savings Plans coverage** | > 70% of steady-state | Measure | Increase if low |
-| **RI coverage** | > 70% of steady-state | Measure | Increase if low |
+| **Savings Plans coverage** | Organization-defined based on the durable usage floor and risk appetite | Measure | Purchase only after scenario analysis |
+| **RI coverage** | Organization-defined for matching stable service/instance usage | Measure | Avoid double-covering usage already covered by Savings Plans |
 | **Spot utilization** | Maximize for batch | Measure | Increase if low |
-| **On-Demand ratio** | < 30% of total | Measure | Reduce if high |
+| **On-Demand ratio** | Preserve enough flexibility for growth, migrations, and uncertainty | Measure | Treat as intentional risk capacity, not automatically waste |
 
 ### Purchase Strategy
 
 | Workload | Recommended | Term | Payment |
 |----------|------------|------|---------|
-| Base load (steady) | Savings Plans | 3 years | All upfront |
-| Predictable growth | Savings Plans | 1 year | Partial upfront |
+| Base load (steady) | Model Savings Plans and/or service reservations | Compare 1 and 3 years | Compare no/partial/all upfront using effective rate and cash constraints |
+| Predictable growth | Layer commitments over time | Prefer shorter/lower initial coverage when forecast risk is material | Re-evaluate recommendations regularly |
 | Batch processing | Spot Instances | N/A | N/A |
 | Development | On-Demand | N/A | N/A |
 | Testing | Spot + On-Demand | N/A | N/A |
@@ -132,11 +127,13 @@ flowchart TD
 
 | Method | Description |
 |--------|-------------|
-| **Service Control Policies** | Organization-level tag requirements |
-| **AWS Config Rules** | Enforce tags on resources |
-| **CloudFormation** | Default tags for stacks |
+| **Service Control Policies** | Deny selected create APIs when documented request-tag conditions are absent; tag-on-create support varies by service/action |
+| **AWS Config Rules** | Detect noncompliant tags and optionally trigger remediation; Config is not preventive by itself |
+| **CloudFormation** | Propagate stack tags to supported resources; not every resource supports propagation |
 | **CDK/Terraform** | Provider-level default tags |
-| **Lambda remediation** | Auto-tag untagged resources |
+| **Tag policies** | Standardize allowed tag keys/values and report compliance; enforcement support depends on resource type and mode |
+
+Activate required user-defined cost allocation tags in Billing; merely attaching a resource tag does not make it appear retroactively in cost allocation reports.
 
 ---
 
@@ -144,23 +141,23 @@ flowchart TD
 
 ### S3 Lifecycle Policies
 
-| Storage Class | Access Pattern | Cost | Retrieval Time |
-|--------------|---------------|------|----------------|
-| **S3 Standard** | Frequent access | $0.023/GB/mo | Milliseconds |
-| **S3 Intelligent-Tiering** | Unknown/changing | $0.023/GB/mo | Milliseconds |
-| **S3 Standard-IA** | Infrequent access | $0.0125/GB/mo | Milliseconds |
-| **S3 One Zone-IA** | Infrequent, non-critical | $0.01/GB/mo | Milliseconds |
-| **S3 Glacier Instant** | Archive, instant access | $0.004/GB/mo | Milliseconds |
-| **S3 Glacier Flexible** | Archive, hours access | $0.0036/GB/mo | Hours |
-| **S3 Glacier Deep** | Archive, days access | $0.00099/GB/mo | 12 hours |
+| Storage Class | Access Pattern | Cost considerations | Retrieval Time |
+|--------------|---------------|---------------------|----------------|
+| **S3 Standard** | Frequent access | Storage, requests, transfer | Milliseconds |
+| **S3 Intelligent-Tiering** | Unknown/changing | Monitoring fee per eligible object; optional archive tiers | Milliseconds for low-latency tiers; restore for optional archive tiers |
+| **S3 Standard-IA** | Infrequent, multi-AZ | 30-day minimum, 128 KB minimum billable size, retrieval fee | Milliseconds |
+| **S3 One Zone-IA** | Infrequent, recreatable | Same duration/size concepts as Standard-IA; single-AZ resilience | Milliseconds |
+| **S3 Glacier Instant Retrieval** | Rare access needing immediate reads | 90-day minimum, 128 KB minimum billable size, retrieval fee | Milliseconds |
+| **S3 Glacier Flexible Retrieval** | Archive | 90-day minimum, per-object metadata, restore/retrieval charges | Minutes to hours after restore |
+| **S3 Glacier Deep Archive** | Long-term archive | 180-day minimum, per-object metadata, restore/retrieval charges | Hours after restore |
 
 ### EBS Optimization
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
-| **gp3 over gp2** | Lower base cost, independent IOPS | Up to 20% |
-| **Right-size volumes** | Delete unused, shrink oversized | 30-50% |
-| **Snapshot lifecycle** | Automate retention policies | 40-60% |
+| **Evaluate gp3 over gp2** | Independent IOPS/throughput and typically lower baseline price | Region/workload-dependent |
+| **Right-size volumes** | Delete unused volumes; EBS volumes cannot be shrunk in place, so migrate data to a smaller volume after validation | Workload-dependent |
+| **Snapshot lifecycle** | Automate retention policies while preserving recovery/compliance objectives | Workload-dependent |
 | **Delete unattached volumes** | Cleanup orphaned volumes | 100% of waste |
 | **Use instance store** | Temporary data, high I/O | Free with instance |
 
@@ -170,22 +167,22 @@ flowchart TD
 
 ### Data Transfer Costs
 
-| Transfer Type | Price | Optimization |
-|---------------|-------|--------------|
-| **Internet out** | $0.09/GB (first 10 TB) | CloudFront caching |
-| **Cross-AZ** | $0.01/GB | Co-locate resources |
-| **Cross-Region** | $0.02/GB | Reduce replication |
-| **VPC peering** | $0.01/GB | Transit Gateway |
-| **Direct Connect** | Port + data fees | Bundle commits |
+| Transfer Type | Charging dimensions | Optimization |
+|---------------|---------------------|--------------|
+| **Internet out** | Service, source Region, destination, tier, and free allowance | Evaluate CloudFront, compression, protocol, and response size |
+| **Cross-AZ** | Service-specific processing and data transfer on one or both sides | Remove accidental hairpins/chattiness; preserve required AZ resilience |
+| **Cross-Region** | Source/destination services and Regions; managed replication may price differently | Replicate only required data and compress/batch where supported |
+| **VPC peering / Transit Gateway / PrivateLink** | Architecture-specific hourly and per-GB processing charges | Compare total paths and operational scale; Transit Gateway is not automatically cheaper than peering |
+| **Direct Connect** | Port-hour, data transfer, provider/cross-connect, and possible gateway charges | Select capacity and resiliency from measured demand |
 
 ### Network Optimization
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
-| **CloudFront caching** | Reduce origin transfers | 50-90% data transfer |
+| **CloudFront caching** | Reduce origin fetches and potentially internet transfer cost | Model cacheability, request fees, invalidations, and hit ratio |
 | **VPC Endpoints** | Avoid NAT/internet gateway | Data transfer costs |
-| **Transit Gateway** | Centralize VPC connectivity | Peering complexity/cost |
-| **NAT Gateway sharing** | One per AZ, not per subnet | NAT Gateway costs |
+| **Transit Gateway** | Centralize large connectivity estates | Operational simplicity; compare attachment and processing charges with peering/Cloud WAN |
+| **NAT architecture** | One NAT gateway per AZ avoids cross-AZ dependency; centralized egress reduces gateway count but can add TGW/cross-AZ cost and blast radius | Model full path and availability requirement |
 | **S3 Transfer Acceleration** | Evaluate vs CloudFront | Transfer costs |
 
 ---
@@ -196,10 +193,10 @@ flowchart TD
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
-| **Multi-AZ for prod only** | Single-AZ for dev/test | 50% DB cost |
-| **Right-size instances** | Match to workload | 30-50% |
-| **Reserved instances** | 1 or 3 year terms | Up to 72% |
-| **Storage auto-scaling** | Avoid over-provisioning | Storage costs |
+| **Match availability to requirements** | Use Multi-AZ when the environment's availability/recovery objective requires it, regardless of the `prod` label | Avoid unnecessary standby capacity without weakening required resilience |
+| **Right-size instances** | Match compute, memory, storage/I/O, licenses, and replica count to workload | Workload-dependent |
+| **Reserved DB instances / Database Savings Plans** | Compare matching reservations with the broader eligible database-spend commitment | Offering- and usage-dependent |
+| **Storage auto scaling** | Prevent storage exhaustion; it does not shrink already allocated storage | Reliability, not automatic savings |
 | **Snapshot retention** | Automate cleanup | Storage costs |
 
 ### DynamoDB Optimization
@@ -207,10 +204,10 @@ flowchart TD
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
 | **On-Demand capacity** | Variable workloads | No over-provisioning |
-| **Provisioned with autoscaling** | Predictable workloads | 60-70% |
+| **Provisioned with autoscaling** | Predictable workloads | Tune target utilization and scheduled capacity from measured demand |
 | **DAX caching** | Reduce read capacity | Read costs |
 | **TTL for time-series** | Auto-expire old data | Storage costs |
-| **Point-in-time recovery** | Disable for non-critical | Backup storage |
+| **Point-in-time recovery** | Set the 1-35 day recovery period from business RPO/compliance needs; DynamoDB PITR pricing does not vary with that retention length | Continuous-backup storage; shortening the recovery period does not reduce PITR charges |
 
 ---
 
@@ -221,17 +218,17 @@ flowchart TD
 | Tool | Purpose | Frequency |
 |------|---------|-----------|
 | **AWS Cost Explorer** | Visualize costs | Weekly |
-| **Cost Anomaly Detection** | Unexpected spikes | Real-time |
+| **Cost Anomaly Detection** | Unexpected spend patterns | Evaluated regularly from billing data; not a real-time control plane or hard spend limit |
 | **Budgets** | Spend limits | Monthly |
-| **Tags Editor** | Tag analysis | Monthly |
-| **Rightsizing recommendations** | Optimization opportunities | Monthly |
+| **Tag Editor / cost allocation tags** | Resource-tag inventory and billing allocation | Monthly |
+| **Cost Optimization Hub / Compute Optimizer** | Consolidated optimization opportunities and resource recommendations | Weekly or aligned to change cadence |
 | **Trusted Advisor** | Best practices | Continuous |
 
 ### Cost Allocation
 
 | Report | Purpose | Granularity |
 |--------|---------|-------------|
-| **Cost and Usage Report** | Detailed line items | Hourly, per resource |
+| **Data Exports CUR 2.0** | Recommended detailed cost and usage export | Hourly, daily, or monthly; resource-level fields depend on configuration/service |
 | **Tag-based allocation** | Team/project costs | By tag value |
 | **Service breakdown** | Service spending | By service |
 | **Region breakdown** | Regional spending | By region |
@@ -249,7 +246,7 @@ flowchart TD
 | **Snapshot cleanup** | Lifecycle policies | Daily |
 | **Right-sizing recommendations** | Compute Optimizer | Weekly |
 | **Unused resource cleanup** | AWS Config/Lambda | Monthly |
-| **Savings Plans purchase** | Cost Explorer | Quarterly |
+| **Savings Plans analysis** | Cost Explorer recommendations and Purchase Analyzer | Review regularly; purchases require deliberate financial approval because commitments cannot be changed after purchase |
 | **Tag enforcement** | AWS Config rules | Continuous |
 
 ### Cost Governance
@@ -261,3 +258,14 @@ flowchart TD
 | **Resource limits** | Service quotas to prevent runaway costs |
 | **Cost reviews** | Monthly cross-team cost reviews |
 | **Optimization backlog** | Track cost improvement tickets |
+
+---
+
+## Authoritative references
+
+- [AWS Well-Architected Cost Optimization Pillar](https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html)
+- [Savings Plans types and eligible scope](https://docs.aws.amazon.com/savingsplans/latest/userguide/plan-types.html)
+- [AWS Compute Optimizer rightsizing methodology](https://docs.aws.amazon.com/compute-optimizer/latest/ug/what-is-compute-optimizer.html)
+- [AWS Data Exports and CUR 2.0](https://docs.aws.amazon.com/cur/latest/userguide/what-is-data-exports.html)
+- [Activating cost allocation tags](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/activating-tags.html)
+- [AWS Cost Anomaly Detection](https://docs.aws.amazon.com/cost-management/latest/userguide/manage-ad.html)

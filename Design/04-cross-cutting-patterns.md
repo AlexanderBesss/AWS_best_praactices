@@ -8,7 +8,7 @@ Advanced architectural patterns for building complex, distributed serverless sys
 
 ## Table of Contents
 
-- [Pattern 1: SNS Fan-Out with SQS Fan-Out](#pattern-1-sns-fan-out-with-sqs-fan-out)
+- [Pattern 1: SNS Fan-Out to SQS Consumer Queues](#pattern-1-sns-fan-out-to-sqs-consumer-queues)
 - [Pattern 2: Saga Pattern for Distributed Transactions](#pattern-2-saga-pattern-for-distributed-transactions)
 - [Pattern 3: Event Sourcing with DynamoDB](#pattern-3-event-sourcing-with-dynamodb)
 - [Pattern 4: Multi-Tenant Serverless Architecture](#pattern-4-multi-tenant-serverless-architecture)
@@ -21,9 +21,9 @@ Advanced architectural patterns for building complex, distributed serverless sys
 
 ---
 
-## Pattern 1: SNS Fan-Out with SQS Fan-Out
+## Pattern 1: SNS Fan-Out to SQS Consumer Queues
 
-Maximum throughput and independent consumer scaling through double-buffering.
+Independent consumer buffering and scaling with SNS-to-SQS fan-out.
 
 ```mermaid
 graph TB
@@ -36,17 +36,11 @@ graph TB
         B -->|Subscribe| Q4[SQS Queue<br/>analytics-queue]
     end
     
-    subgraph "Fan-Out Layer 2: SQS to Lambda Fan"
-        Q1 -->|Event Source Mapping| L1A[Lambda<br/>Worker A1]
-        Q1 -->|Event Source Mapping| L1B[Lambda<br/>Worker A2]
-        Q1 -->|Event Source Mapping| L1C[Lambda<br/>Worker A3]
-        
-        Q2 -->|Event Source Mapping| L2A[Lambda<br/>Worker B1]
-        Q2 -->|Event Source Mapping| L2B[Lambda<br/>Worker B2]
-        
-        Q3 -->|Event Source Mapping| L3A[Lambda<br/>Worker C1]
-        
-        Q4 -->|Event Source Mapping| L4A[Lambda<br/>Analytics Worker]
+    subgraph "Independent Lambda Consumers"
+        Q1 -->|Event Source Mapping| L1[Lambda Team A<br/>Concurrent Executions]
+        Q2 -->|Event Source Mapping| L2[Lambda Team B<br/>Concurrent Executions]
+        Q3 -->|Event Source Mapping| L3[Lambda Team C<br/>Concurrent Executions]
+        Q4 -->|Event Source Mapping| L4[Lambda Analytics<br/>Concurrent Executions]
     end
     
     subgraph "Dead-Letter Queues"
@@ -59,14 +53,14 @@ graph TB
 
 ### Why This Pattern?
 
-A single SNS topic delivering straight to Lambda subscribers ties every consumer's throughput and failure behavior to the noisiest one — a slow or throttled team's Lambda causes retries against the topic that can affect delivery to unrelated subscribers, and there's no buffer to absorb a burst without over-provisioning Lambda concurrency for every consumer at once. Without a queue in front of each consumer, a producer spike (e.g., a batch upload firing thousands of events in seconds) either gets dropped past SNS's retry policy or forces every downstream Lambda to scale to match the peak, even ones that don't need to.
+SNS isolates delivery attempts per subscription, but a direct Lambda subscription has no consumer-controlled backlog. A burst can make every subscriber scale at once, and a subscriber cannot inspect queue depth or deliberately drain work at a bounded rate. A dedicated SQS queue per consumer adds durable buffering and independent visibility timeout, concurrency, and redrive settings while preserving one-to-many fan-out.
 
 **Trade-off:** every consumer now needs its own SQS queue and (usually) DLQ to manage, which multiplies the number of resources to monitor, tag, and pay for — polling/delivery costs on N queues add up even when the underlying event volume is modest, and message duplication across the two fan-out layers requires each consumer to be idempotent. For a handful of low-volume subscribers this operational overhead outweighs the isolation benefit.
 
 ### Throughput Calculation
 
 ```
-Throughput per SQS Queue = 
+Approximate processing capacity per SQS queue =
     (Lambda Concurrency) × (Batch Size) / (Avg Invocation Time)
 
 Example:
@@ -76,6 +70,8 @@ Total Throughput = Sum of all queue throughputs
     = 500 + 300 + 200 + 100 = 1,100 events/second
 ```
 
+This is a planning estimate, not a service guarantee. Effective throughput is also bounded by queue backlog, Lambda concurrency quotas and scaling behavior, event-source polling, payload size, downstream capacity, failures, and—for FIFO queues—message-group concurrency. One event source mapping normally invokes one Lambda function at varying concurrency; drawing several functions from one queue would create competing consumers, not another fan-out copy.
+
 ### Why Double Fan-Out?
 
 Benefits of layering an SQS fan-out under the SNS fan-out instead of going straight to Lambda.
@@ -83,12 +79,12 @@ Benefits of layering an SQS fan-out under the SNS fan-out instead of going strai
 | Benefit | Description |
 |---------|-------------|
 | **Independent scaling** | Each team scales Lambda independently |
-| **Isolation** | One team's backlog doesn't others |
+| **Isolation** | One team's backlog doesn't block the others |
 | **Backpressure** | SQS absorbs spikes, Lambda processes at steady rate |
 | **Cost optimization** | Each queue tunes batch size and concurrency |
 | **Failure isolation** | One DLQ doesn't impact other consumers |
 
-Note: DLQs are configured on the SQS queues via redrive policy (`MaxReceiveCount`), not on Lambda. Each SQS queue has its own `redriveAllowPolicy` and `redriveAllowPolicy`.
+Note: DLQs are configured on the SQS source queues with a `RedrivePolicy` (`maxReceiveCount` and `deadLetterTargetArn`). The DLQ can use a `RedriveAllowPolicy` to restrict which source queues may target it.
 
 ### When NOT to Use
 
@@ -254,7 +250,7 @@ How to build read-model projections from the event store depending on latency to
 
 - **Snapshotting**: For aggregates with long event histories, store periodic snapshots to avoid replaying all events on reconstruction. Keep snapshots in a separate table keyed by `aggregate_id` + `sequence_number`.
 - **Replay from Event Store**: Replay reads from the Event Store table (using `aggregate_id`/`sequence_number` composite key), not from DynamoDB Streams (24h retention only).
-- **Optimistic concurrency**: Use DynamoDB `ConditionExpression` with `version` attribute to prevent concurrent modifications.
+- **Optimistic concurrency**: Atomically reserve the next aggregate version—for example, update an aggregate metadata item and append the event in one `TransactWriteItems` call—or condition the append on the expected sequence. `attribute_not_exists` on an event key prevents duplicate sequence numbers but does not by itself prevent gaps.
 
 ### When NOT to Use
 
@@ -299,7 +295,7 @@ graph TB
 
 Running one stack per customer scales linearly in operational cost — every deployment, patch, and monitoring dashboard has to be replicated per tenant, and idle tenants still pay for provisioned infrastructure. Without a deliberate isolation strategy, teams either default to full per-tenant stacks (unsustainable past a few dozen customers) or default to a shared stack with no tenant boundary at all, where a missing `tenant_id` filter in one query becomes a cross-tenant data leak. This pattern exists to make the isolation boundary — whether it's a partition key, a separate table, or a separate account — an explicit, reviewable part of the design rather than something enforced ad hoc in application code.
 
-**Trade-off:** shared-infrastructure tenancy means a noisy or misbehaving tenant can consume DynamoDB capacity or Lambda concurrency that other tenants depend on unless you add per-tenant throttling or reserved concurrency, and a bug in the shared code path affects every tenant simultaneously instead of one. Moving to stronger isolation (separate tables or accounts) removes that blast radius but reintroduces the per-tenant operational cost this pattern is trying to avoid — the right level is a cost/blast-radius trade rather than a default.
+**Trade-off:** shared-infrastructure tenancy means a noisy or misbehaving tenant can consume DynamoDB capacity or Lambda concurrency that other tenants depend on unless you add application/API throttling or route tiers to separate functions with their own reserved concurrency. Reserved concurrency is configured per Lambda function, not per tenant inside one shared function. A bug in the shared code path also affects every tenant simultaneously instead of one. Moving to stronger isolation (separate tables or accounts) removes that blast radius but reintroduces the per-tenant operational cost this pattern is trying to avoid—the right level is a cost/blast-radius trade rather than a default.
 
 ### Isolation Levels
 
@@ -308,7 +304,7 @@ Multi-tenant isolation tiers, ranging from shared tables to fully separate accou
 | Level | Data | Compute | Cost | Complexity |
 |-------|------|---------|------|-----------|
 | **Shared** | Same table, tenant_id filter | Same Lambda | Shared, tagged | Low |
-| **Semi-Isolated** | Same table, tenant_id filter + GSIs for queries | Same Lambda, separate concurrency | Partial separation | Medium |
+| **Semi-Isolated** | Same table, tenant-aware keys and GSIs | Shared functions with application throttles, or separate functions per tier for reserved concurrency | Partial separation | Medium |
 | **Isolated** | Separate tables | Separate Lambda functions | Fully separated | High |
 | **Fully Isolated** | Separate accounts | Separate accounts | Fully separated | Very High |
 
@@ -318,11 +314,13 @@ Factors that push the isolation choice toward shared, semi-isolated, or fully is
 
 | Factor | Shared | Semi-Isolated | Fully Isolated |
 |--------|--------|--------------|----------------|
-| Tenant count | 100s-1000s | 10-100 | 1-50 |
-| Data sensitivity | Low | Medium | High |
-| Compliance needs | None | Standard | Strict (HIPAA, PCI) |
-| Customization | None | Configuration | Code-level |
-| SLA requirements | Standard | Enhanced | Dedicated |
+| Tenant population | Large and homogeneous | Mixed tiers or a smaller set of higher-value tenants | Small set of tenants requiring dedicated boundaries |
+| Data sensitivity | Shared controls satisfy the threat model | Extra data/compute controls needed for selected tenants | Account-level blast-radius isolation required |
+| Compliance | Permitted by the assessed control design | Different control sets or residency needs by tier | Dedicated environment required by the verified control design or contract |
+| Customization | Configuration only | Per-tier configuration or capacity | Tenant-specific infrastructure/code |
+| Service objectives | Shared capacity and SLO | Per-tier throttles/capacity | Dedicated capacity and failure domain |
+
+Compliance frameworks such as PCI DSS or HIPAA do not by themselves prescribe one of these tenancy models. Choose from the workload's documented control requirements, threat model, contracts, and evidence strategy.
 
 ---
 
@@ -334,8 +332,10 @@ Command Query Responsibility Segregation with centralized event routing.
 graph TB
     subgraph "Command Side"
         A[Write API] --> B[Lambda<br/>Command Handler]
-        B -->|Write| C[(DynamoDB<br/>Aggregate Store)]
-        B -->|Publish Event| D[EventBridge<br/>Domain Events Bus]
+        B -->|Atomic write| C[(DynamoDB<br/>Aggregate Store)]
+        B -->|Same transaction| O[(DynamoDB<br/>Outbox)]
+        O -->|DynamoDB Stream| P[Lambda<br/>Event Publisher]
+        P -->|PutEvents| D[EventBridge<br/>Domain Events Bus]
     end
     
     subgraph "Event Processing"
@@ -365,6 +365,8 @@ A single data model optimized for writes (normalized, transactional) is usually 
 
 **Trade-off:** every read model is only as fresh as its projector has processed, so reads are eventually consistent with writes — a user can create an order and not see it in the dashboard view for the duration of the EventBridge rule match and Lambda projection latency. Each additional read model is also another projector to build, monitor, and keep in sync, and a failed or delayed projection silently produces stale results unless you add explicit lag monitoring. For workloads with a single query shape, this is added infrastructure without a corresponding benefit.
 
+The aggregate update and outbox record must be committed atomically. Publishing directly to EventBridge after a database write is a dual-write failure window: the database can commit while `PutEvents` fails. The outbox publisher is at-least-once, so events need stable IDs and projectors must be idempotent. Also inspect each `PutEvents` result because an HTTP 200 response can contain failed entries.
+
 ### CQRS Event Flow
 
 How each domain event fans out to projectors and which read models get updated.
@@ -376,7 +378,7 @@ How each domain event fans out to projectors and which read models get updated.
 | `OrderCancelled` | Update aggregate | Dashboard, Analytics | Dashboard, Analytics |
 | `PaymentReceived` | Update aggregate | Dashboard | Dashboard view |
 
-Note: EventBridge events are limited to 1 MB (raised from 256 KB in Jan 2026); `PutEvents` requests can batch up to 10 entries but the total request must stay under 1 MB. Consider this limit for high-throughput CQRS with large event payloads.
+Note: a `PutEvents` request can contain up to 10 entries, and the total request must remain under 1 MB. A single entry can consume that total when sent alone. Keep events small and store large payloads in S3 with a reference.
 
 ### When NOT to Use
 
@@ -457,9 +459,9 @@ graph TB
     B --> C[Lambda<br/>Dashboard Aggregator]
     
     subgraph "Parallel Service Calls"
-        C -->|SDK Invoke (Promise.all)| D[Lambda<br/>User Service]
-        C -->|SDK Invoke (Promise.all)| E[Lambda<br/>Orders Service]
-        C -->|SDK Invoke (Promise.all)| F[Lambda<br/>Recommendations Service]
+        C -->|Parallel SDK invoke| D[Lambda<br/>User Service]
+        C -->|Parallel SDK invoke| E[Lambda<br/>Orders Service]
+        C -->|Parallel SDK invoke| F[Lambda<br/>Recommendations Service]
         C -->|Direct SDK| G[DynamoDB<br/>Preferences]
     end
     
@@ -486,8 +488,8 @@ A client that needs data from several microservices to render one screen either 
 ### Aggregation Timeout Budget
 
 ```
-API Gateway: 29s (REST/HTTP API timeout)
-└── Aggregator Lambda: 25s
+API Gateway integration: use the configured API-type limit (HTTP APIs: max 30s)
+└── Example aggregator Lambda budget: 25s
     ├── User Service: 3s timeout (cached fallback)
     ├── Orders Service: 5s timeout
     ├── Recommendations: 3s timeout (optional)
@@ -496,12 +498,12 @@ API Gateway: 29s (REST/HTTP API timeout)
     └── Buffer: 11s
 ```
 
-Note: The aggregator Lambda's memory and timeout must accommodate all parallel calls. Lambda-to-Lambda synchronous invocation uses the AWS SDK (`lambda.invoke()`), not direct function calls.
+Note: The aggregator Lambda's memory and timeout must accommodate all parallel calls. Lambda-to-Lambda synchronous invocation uses the AWS SDK (`lambda.invoke()`), not direct function calls. HTTP API integrations have a fixed 30-second maximum. REST API defaults and quota options differ—for Regional and private REST APIs, a higher integration timeout can be requested—so verify the deployed API type instead of assuming 29 seconds universally.
 
 ### When NOT to Use
 
 - Don't use when a single service can provide all data — direct call is simpler
-- Don't use for large aggregations (>10 services) — response assembly becomes fragile
+- Don't use when the downstream fan-out cannot fit a measured latency/error budget or creates an unacceptable correlated-failure surface; there is no universal service-count cutoff
 
 ---
 
@@ -549,7 +551,7 @@ graph TB
 
 ### Why This Pattern?
 
-Serving a global user base from a single region means every request outside that region pays cross-continent round-trip latency, and a regional outage takes the entire application down with no fallback. DynamoDB Global Tables solves both by replicating data to every region so each user's requests are served locally and a region failure only removes that region's capacity, not the whole system's — but multi-master replication means the same item can be written concurrently in two regions before either write has propagated, and something has to decide which write wins.
+Serving a global user base from a single Region means every request outside that Region pays cross-continent round-trip latency, and a Regional outage leaves no local replica. DynamoDB global tables provide writable replicas in multiple Regions. The default multi-Region eventual consistency (MREC) mode replicates asynchronously and resolves concurrent same-item writes with last-writer-wins. Multi-Region strong consistency (MRSC) is a separate creation-time mode with stricter Region/topology requirements and different latency, availability, and feature trade-offs.
 
 **Trade-off:** conflict resolution is last-writer-wins by default, which silently discards one of the concurrent writes rather than merging them — acceptable for data where "most recent update" is the correct semantic, but wrong for cases like decrementing a counter or appending to a list, where a naive overwrite loses an update instead of combining it. Multi-region writes also mean paying for replicated write capacity in every region regardless of where the traffic actually originates, which is wasted spend for an application that only serves a single region's users.
 
@@ -559,16 +561,16 @@ Approaches for resolving concurrent writes to the same item across regions.
 
 | Strategy | Behavior | Use Case |
 |----------|----------|----------|
-| **Last-Writer-Wins** | Latest timestamp wins (version-based ordering) | Most common, simple |
-| **Custom via Streams + Lambda** | DynamoDB Streams + Lambda per region for business logic | Complex domains (not native to Global Tables) |
-| **Client-Side** | Application handles conflicts | Real-time collaboration |
+| **MREC: Last-Writer-Wins** | DynamoDB chooses the write with the latest internal timestamp per item | Acceptable where overwrite semantics match the domain |
+| **MREC: Conflict avoidance** | Route ownership of a key to one Region or model commutative/append-only updates | Counters, ledgers, and domains where lost updates are unacceptable |
+| **MRSC** | Strongly consistent multi-Region writes with zero RPO, subject to supported topology/Region constraints | Workloads that need multi-Region strong consistency |
 
-Note: DynamoDB Global Tables uses multi-master replication with eventual consistency across regions. Modern Global Tables resolve conflicts with last-writer-wins using version-based ordering.
+Choose MREC or MRSC when the table is created; the consistency mode cannot be changed later. MREC is the default and uses last-writer-wins. MRSC requires exactly three participating Regions (three replicas, or two replicas and a witness) and should be validated against current Region and feature support.
 
 ### When NOT to Use
 
 - Don't use for single-region applications — single-region DynamoDB is simpler and cheaper
-- Don't use when strong cross-region consistency is required — use single-region writes with read replicas
+- Don't use MREC when strong cross-Region consistency is required; evaluate MRSC or a single-writer design
 
 ---
 
@@ -580,7 +582,7 @@ Cost, ordering, and feature comparison behind the choice between the two.
 
 | Criteria | SQS | EventBridge |
 |----------|-----|-----------|
-| Cost | $0.40/M messages (US East, approx) | $1.00/M events (US East, approx) |
+| Cost basis | API requests; batching can reduce request count | Custom/partner events, archive/replay, and target-related charges |
 | Ordering | FIFO available | No ordering |
 | Filtering | Message attributes | Event patterns |
 | Replay | Not supported | Archive replay |
@@ -593,11 +595,11 @@ Cold-start, scaling, and query-complexity trade-offs behind the choice between t
 
 | Criteria | DynamoDB | Aurora Serverless |
 |----------|----------|------------------|
-| Cold starts | None (HTTP) | With RDS Proxy: minimal |
-| Scaling | Automatic | Scale up/down (seconds) |
+| Connection startup | No database session; reuse the SDK HTTP client | Direct connection setup, RDS Proxy, or RDS Data API where supported |
+| Scaling | Capacity mode and workload dependent | Aurora Serverless v2 scales in ACU increments, but response time and maximum scale rate are workload/configuration dependent |
 | Query complexity | Simple queries | Complex SQL, JOINs |
 | Transactions | Single-item + transact | Full ACID |
-| Connection management | Not needed | RDS Proxy required |
+| Connection management | No database connection pool | Direct connection reuse, RDS Proxy, or Data API depending on engine and concurrency |
 | **Decision** | **DynamoDB for simple, high-scale** | **Aurora for complex queries, schema** |
 
 ### ADR-003: Step Functions vs Lambda Chaining
@@ -606,12 +608,12 @@ Cost, duration limits, and error-handling trade-offs behind the choice between t
 
 | Criteria | Step Functions | Lambda Chaining |
 |----------|---------------|-----------------|
-| Cost | $25/1000 transitions (Standard) / $0.25/1000 (Express) | $0.20/M invocations |
-| Max duration | 1 year | 15 minutes |
+| Cost basis | Standard: transitions; Express: requests, duration, and memory | Lambda requests and duration |
+| Duration | Standard: up to 1 year; Express: up to 5 minutes | Each Lambda invocation: up to 15 minutes; caller timeout still bounds a synchronous chain |
 | Error handling | Built-in catch/retry | Manual |
-| Visibility | Execution history | CloudWatch only |
+| Visibility | Standard execution history; Express requires CloudWatch Logs for history | Application logs/metrics/traces |
 | Complexity | Visual workflow | Code-based |
-| **Decision** | **Step Functions for workflows >3 steps** | **Lambda chain for simple sync calls** |
+| **Decision** | **Use Step Functions when durable state, branching, retries, callbacks, or execution visibility justify orchestration** | **Use a direct call for a genuinely simple, bounded synchronous dependency** |
 
 ---
 
@@ -627,3 +629,14 @@ Common cross-cutting design mistakes and the fix for each.
 | **Tight coupling in saga** | Hard to modify steps | Use choreography or event-driven saga |
 | **Ignoring DynamoDB partition skew** | Hot partitions, throttling | Use randomized sort keys, time-based partitioning |
 | **No cost allocation tags** | Can't identify cost drivers | Tag all resources with tenant/service/env |
+
+---
+
+## Authoritative AWS references
+
+- [Lambda with Amazon SQS event source mappings](https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html)
+- [DynamoDB Streams retention and processing](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html)
+- [DynamoDB transactional write operations](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html)
+- [Amazon EventBridge `PutEvents`](https://docs.aws.amazon.com/eventbridge/latest/APIReference/API_PutEvents.html)
+- [API Gateway HTTP API quotas](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html)
+- [DynamoDB global-table consistency modes](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadConsistency.html)

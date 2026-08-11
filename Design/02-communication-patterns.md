@@ -17,27 +17,28 @@ Serverless communication patterns define how Lambda functions, APIs, and event s
 - [Pattern 6: Step Functions Orchestration](#pattern-6-step-functions-orchestration)
 - [Pattern 7: WebSocket API with Lambda](#pattern-7-websocket-api-with-lambda)
 - [Anti-Patterns to Avoid](#anti-patterns-to-avoid)
+- [Authoritative References](#authoritative-references)
 
 ---
 
 ## Communication Mechanisms Comparison
 
-Latency, cost, and payload limits across the available serverless communication mechanisms.
+Communication style, billing dimensions, and key payload quotas across common serverless mechanisms. Prices vary by Region and tier; use the AWS Pricing Calculator rather than treating a point-in-time example price as an architecture constant.
 
-| Mechanism | Type | Latency | Cost (US East) | Max Payload | Best For |
-|-----------|------|---------|----------------|-------------|----------|
-| **Synchronous Invoke** | Direct | 10-100ms | $0.20/M invocations | 6 MB | Request-response, real-time |
-| **Async Invoke** | Queued | 100ms-1s | $0.20/M invocations | 1 MB (raised from 256 KB, Oct 2025) | Fire-and-forget |
-| **API Gateway REST + Lambda** | HTTP | 50-200ms | $3.50/M calls + Lambda | 10 MB req / 6 MB resp | REST APIs |
-| **API Gateway HTTP + Lambda** | HTTP | 30-150ms | $0.35/M calls + Lambda | 10 MB req / 10 MB resp | Lightweight REST APIs |
-| **Lambda Function URL** | HTTP | 20-100ms | $0.45/M calls + Lambda | 10 MB | Direct Lambda HTTP |
-| **AppSync + Lambda** | GraphQL | 50-200ms | $2.50/M calls + Lambda | 1 MB | GraphQL APIs |
-| **SNS → Lambda** | Push | 100ms-1s | $0.60/M + Lambda | 256 KB | Fan-out, notifications |
-| **SQS → Lambda** | Pull | 1s-60s | $0.40/M + Lambda | 1 MiB (raised from 256 KB, Aug 2025) | Async processing |
-| **EventBridge → Lambda** | Push | 100ms-1s | $1.00/M events | 1 MB (raised from 256 KB, Jan 2026) | Event routing |
-| **Step Functions Standard** | Orchestration | 1s+ | $25/M transitions | 256 KB | Long workflows, human tasks |
-| **Step Functions Express** | Orchestration | <1s | $0.25/M executions | 256 KB | Event processing, fast workflows |
-| **Lambda-to-Lambda (SDK)** | Direct | 10-50ms | $0.20/M invocations | 6 MB | Service-to-service |
+| Mechanism | Type | Primary Billing Dimensions | Key Payload Quota | Best For |
+|-----------|------|----------------------------|-------------------|----------|
+| **Synchronous Invoke** | Direct | Lambda requests + duration | 6 MB request/response | Request-response |
+| **Async Invoke** | Managed queue | Lambda requests + duration | 1 MB event | Fire-and-forget |
+| **API Gateway REST + Lambda** | HTTP | API calls, data transfer, optional cache + Lambda | 10 MB API payload; Lambda buffered response is 6 MB | Feature-rich REST APIs |
+| **API Gateway HTTP + Lambda** | HTTP | API calls + data transfer + Lambda | 10 MB API payload; Lambda buffered response is 6 MB | Lower-cost HTTP APIs |
+| **Lambda Function URL** | HTTP | Lambda requests + duration; no endpoint surcharge | 6 MB buffered request/response; response streaming has separate quotas | Simple single-function HTTP endpoint |
+| **AppSync + Lambda** | GraphQL | Query/data-modification operations, real-time updates, connection minutes + Lambda | 5 MB resolver/function response; 240 KB subscription payload | GraphQL APIs |
+| **SNS → Lambda** | Push | Publishes/deliveries + Lambda | 256 KB message | Fan-out, notifications |
+| **SQS → Lambda** | Poll | SQS requests + Lambda; provisioned pollers if enabled | 1 MiB message; Lambda batch is capped by invocation payload | Async processing |
+| **EventBridge → Lambda** | Push | Custom/partner events + Lambda | 1 MB per `PutEvents` request | Event routing |
+| **Step Functions Standard** | Orchestration | State transitions | 256 KiB state input/output | Long workflows, callback tasks |
+| **Step Functions Express** | Orchestration | Executions, duration, and memory | 256 KiB state input/output | High-volume, short workflows |
+| **Lambda-to-Lambda (SDK)** | Direct | Lambda requests + duration | 6 MB sync / 1 MB async | Tightly coupled service call |
 
 ---
 
@@ -80,24 +81,26 @@ When to keep a synchronous chain versus switching to an async alternative.
 | Factor | Sync Chain | Async Alternative |
 |--------|-----------|-------------------|
 | Client needs immediate result | Use sync | Not applicable |
-| Total execution < 15s | Use sync | Not applicable |
+| Execution fits the caller and integration timeout budgets with margin | Use sync | Prefer async when work can outlive the request deadline |
 | Multiple downstream calls | Risk: timeout cascade | Use SQS/SNS fan-out |
-| Error handling complexity | High (manual retries) | Low (built-in retries) |
+| Error handling complexity | Caller owns bounded retries and timeout handling | Source-specific retries/DLQs help, but idempotency and terminal-failure handling remain required |
 | Cold start impact | Multiplied across chain | Isolated per service |
 
 ### When NOT to Use
 
-- Don't use sync chains deeper than 3 levels — use Step Functions or SQS/SNS fan-out
-- Don't use for cross-region calls — latency will cause timeouts
+- Avoid multi-hop synchronous chains when one downstream slowdown can consume the caller's timeout budget; use Step Functions or asynchronous messaging
+- Avoid synchronous cross-Region calls on critical paths unless the measured latency and failure model meet the workload's SLO
 
 ### Timeout Budget Allocation
 
 ```
-API Gateway timeout: 29s
-├── Lambda Orchestrator: 25s
-│   ├── Service A: 8s (timeout)
-│   ├── Service B: 8s (timeout)
-│   └── Buffer: 9s
+Caller deadline: derive from the product SLO and API integration quota
+├── API and network overhead
+├── Orchestrator budget
+│   ├── Service A bounded timeout
+│   ├── Service B bounded timeout
+│   └── Retry budget (only for safe, idempotent operations)
+└── Safety margin before the caller deadline
 ```
 
 ---
@@ -117,7 +120,7 @@ graph TB
     end
     
     subgraph "Authentication"
-        B -->|JWT Validation| G[Cognito User Pool]
+        B -->|Cognito user pool authorizer| G[Cognito User Pool]
         B -->|Custom Auth| H[Lambda Authorizer]
     end
     
@@ -138,7 +141,7 @@ graph TB
 
 A Lambda Function URL works for exposing a single endpoint, but a real API needs request validation, authentication/authorization, throttling, usage tiers, and multiple routes mapped to different functions — reimplementing all of that inside every Lambda is duplicated effort and produces inconsistent behavior across endpoints. API Gateway centralizes those cross-cutting concerns in front of Lambda, so each function only implements its own business logic while auth, throttling, validation, and caching are configured once at the API layer.
 
-**Trade-off:** API Gateway adds its own latency and per-call cost on top of Lambda's, and REST API in particular is markedly more expensive than HTTP API for the same traffic — pick the cheaper HTTP API unless you specifically need REST-only features like WebSocket or canary deployments.
+**Trade-off:** API Gateway adds its own latency and per-call cost on top of Lambda's, and REST APIs cost more than HTTP APIs at the entry tier. Prefer an HTTP API unless you need REST-only capabilities such as API keys and usage plans, request validation, response caching, or stage canaries. WebSocket APIs are a separate API Gateway API type, not a REST API feature.
 
 ### API Gateway Configuration Best Practices
 
@@ -147,10 +150,9 @@ Key settings to configure on an API Gateway REST API and why each matters.
 | Setting | Value | Purpose |
 |---------|-------|---------|
 | `Throttling` | Per-API + per-method | Protect backend from overload |
-| `Usage Plans` | Tier-based rates | API monetization, tiered access |
+| `Usage Plans` | Tier-based rates and quotas | Best-effort per-key throttling and usage tiers; API keys are not authentication or billing |
 | `Request Validation` | Body + params | Early error detection |
 | `Response Caching` | Stage cache, TTL | Reduce Lambda invocations |
-| `WebSocket` | For real-time | Bidirectional communication |
 | `Custom Domain` | ACM certificate | Production deployment |
 | `Canary Deployments` | Percentage routing | Safe rollouts |
 
@@ -160,10 +162,10 @@ Side-by-side comparison to help choose between API Gateway's two REST-style API 
 
 | Feature | REST API | HTTP API |
 |---------|----------|----------|
-| Cost | $3.50/M calls | $0.35/M calls (10x cheaper) |
+| Cost model | Higher entry-tier price per call; optional cache charges | Lower entry-tier price per call; no API Gateway response cache |
 | Latency | Higher | Lower |
-| Lambda Authorizers | Token + Request | JWT + Lambda |
-| WebSocket | Supported | Not supported |
+| Authorization options | IAM, Cognito user pool, Lambda token/request authorizers | IAM, JWT, and Lambda authorizers |
+| WebSocket | Separate WebSocket API type | Separate WebSocket API type |
 | Canary Deployments | Supported | Not supported |
 | Best for | Complex APIs, migration | New APIs, cost-sensitive |
 
@@ -173,9 +175,9 @@ Authorizer options for API Gateway, their caching behavior, and typical use case
 
 | Type | Caching | Use Case |
 |------|---------|----------|
-| **JWT Authorizer** | Built-in | Cognito integration, standard OAuth |
-| **Lambda Token Authorizer** | 5-3600s cache | Custom token validation |
-| **Lambda Request Authorizer** | 5-3600s cache | Header/body-based auth |
+| **JWT Authorizer (HTTP API)** | No configurable authorizer-result cache; API Gateway caches the issuer's public keys | Cognito/OIDC/OAuth 2.0 JWTs |
+| **Lambda Token Authorizer (REST API)** | Configurable result cache | Custom token validation |
+| **Lambda Request Authorizer** | Configurable result cache | Headers, query strings, path/stage/context-based authorization |
 | **IAM Authorizer** | N/A | Service-to-service, CLI access |
 
 ---
@@ -226,23 +228,25 @@ Some requests take longer to process than an HTTP client is willing to hold a co
 
 ### SQS Buffer Sizing
 
-Recommended queue and Lambda concurrency settings by expected message load.
+Size the event source mapping from measured workload behavior rather than a fixed messages-per-second tier.
 
-| Expected Load | Queue Visibility Timeout | Lambda Batch Size | Max Concurrency | Reserved Concurrency |
-|--------------|------------------------|-------------------|-----------------|---------------------|
-| Low (<100 msg/s) | 30s | 10 | 10 | 10 (controls fan-out) |
-| Medium (100-1000 msg/s) | 60s | 10 | 100 | 100 |
-| High (>1000 msg/s) | 300s | 10 | 1000+ | 1000+ |
+| Sizing input | Guidance |
+|--------------|----------|
+| Queue visibility timeout | For Lambda, use at least six times the function timeout plus the batching window |
+| Batch size and window | Tune from payload size, duration, latency objective, and failure-isolation needs; the complete batch must fit Lambda's invocation payload quota |
+| Event-source maximum concurrency | Cap at the downstream system's measured safe throughput and leave headroom for retries |
+| Function reserved concurrency | Reserves and caps function concurrency; do not automatically set it equal to event-source maximum concurrency, and preserve enough account concurrency for other functions |
+| Backlog signals | Alarm on message age and queue depth relative to the processing-latency SLO, not on a universal count |
 
-Note: Reserved Concurrency acts as a flow-control mechanism, limiting backpressure and protecting downstream services.
+There is a durability gap if the API handler writes a status record and then separately enqueues work: either operation can succeed while the other fails. Use a transactional outbox/change stream pattern (for example, a DynamoDB write consumed through DynamoDB Streams) or another idempotent acceptance design, and return `202 Accepted` only after the request has been durably accepted.
 
 ### Lambda Destinations
 
-Configure on-success/on-failure routing for async invocations to SQS, SNS, EventBridge, or Lambda. Provides reliable delivery without manual error handling code.
+For direct asynchronous Lambda invocation, configure on-success/on-failure destinations to SQS, SNS, EventBridge, Lambda, or (for supported failure destinations) S3. This configuration does not apply to SQS event source mappings; use the source queue's redrive policy and partial batch responses there.
 
 ### When NOT to Use
 
-- Don't use when client needs immediate confirmation — use synchronous invocation
+- Don't use when the client needs the completed result in the initial response — use synchronous invocation
 - Don't use for simple fire-and-forget without tracking — direct async invoke is simpler
 
 ---
@@ -276,18 +280,18 @@ graph TB
     B -->|Sync Invoke| D
     B -->|Sync Invoke| F
     B -->|Async Invoke| H
-    
+
     subgraph "Cross-Account"
-        J[VPC Endpoint<br/>lambda.us-east-1.vpce]
-        K[Resource Policy<br/>Cross-Account Access]
+        J[Caller role in Account A] -->|InvokeFunction| K[Lambda function in Account B]
+        L[Resource-based policy] -.-> K
     end
 ```
 
 ### Why This Pattern?
 
-In a microservices-style Lambda architecture, one service's function often needs to call another directly — validate a payment, check inventory — without the overhead of standing up API Gateway or a queue for what's a purely internal, low-throughput call. Direct SDK invocation (`lambda.invoke()`) is the lowest-latency, no-extra-infrastructure way to make that call, synchronously or asynchronously, within the same account/region.
+In a microservices-style Lambda architecture, one service's function often needs to call another directly — validate a payment, check inventory — without standing up API Gateway or a queue for a purely internal, low-throughput call. Direct SDK invocation (`lambda.invoke()`) avoids an intermediary and can be used synchronously or asynchronously within the same account and Region.
 
-**Trade-off:** it creates the same tight coupling as any direct call — the caller hardcodes the callee's function ARN and must have IAM permission to invoke it — so it doesn't scale well to fan-out (use SNS/EventBridge instead) and shouldn't be used across regions, where SQS or EventBridge handle the latency and reliability concerns better.
+**Trade-off:** it creates the same tight coupling as any direct call — the caller identifies the callee and must have IAM permission to invoke it — so it doesn't scale well to fan-out (use SNS/EventBridge instead). For cross-Region calls, measure the latency and failure model against the SLO and prefer an asynchronous regional design when the caller does not need an immediate response.
 
 ### Invocation Types for Service-to-Service
 
@@ -325,7 +329,7 @@ lambda_client.invoke(
 
 ### When NOT to Use
 
-- Don't use for cross-region communication — use SQS or EventBridge
+- Avoid cross-Region direct calls on critical paths unless measured latency and availability meet the workload SLO; choose EventBridge, SNS, SQS, or regional APIs according to delivery and response requirements
 - Don't use for high-throughput fan-out — use SNS instead
 
 ### Resource-Based Policy for Cross-Account
@@ -337,7 +341,7 @@ lambda_client.invoke(
     {
       "Effect": "Allow",
       "Principal": {
-        "AWS": "arn:aws:iam::123456789012:root"
+        "AWS": "arn:aws:iam::123456789012:role/order-service-invoker"
       },
       "Action": "lambda:InvokeFunction",
       "Resource": "arn:aws:lambda:us-east-1:111122223333:function:my-function",
@@ -375,7 +379,8 @@ graph TB
         B -->|Rule: order.*| E[SNS Topic<br/>order-notifications]
         B -->|Rule: payment.*| F[SQS Queue<br/>payment-processing]
         B -->|Rule: inventory.low| G[Step Functions<br/>restock-workflow]
-        B -->|Rule: audit.*| H[(S3<br/>audit-logs)]
+        B -->|Rule: audit.*| H[Firehose Delivery Stream]
+        H --> H2[(S3<br/>audit-logs)]
         B -->|Archive| I[EventBridge Archive<br/>365-day retention]
     end
     
@@ -385,7 +390,7 @@ graph TB
         G --> L[Lambda<br/>Restock Actions]
     end
     
-    C -->|AWS Events| M[Lambda<br/>CloudWatch Alarms]
+    C -->|AWS Events| M[Lambda<br/>Alert Handler]
     C -->|AWS Events| N[SQS Queue<br/>backup-trigger]
 ```
 
@@ -402,9 +407,10 @@ Capabilities provided by the EventBridge Schema Registry for managing event cont
 | Feature | Description |
 |---------|-------------|
 | **Schema Discovery** | Automatic schema detection from events |
-| **Schema Validation** | Validate events against registered schemas |
 | **Code Generation** | Generate SDK code for event types |
 | **Versioning** | Track schema evolution over time |
+
+The registry discovers and stores schemas and can generate code bindings, but it does not enforce producer or consumer compatibility at runtime. Add contract validation and compatibility checks to CI/CD when schema guarantees matter.
 
 ### When NOT to Use
 
@@ -422,18 +428,19 @@ graph TB
     A[Start] --> B{Input Validation<br/>Lambda}
     B -->|Valid| C[Process Payment<br/>Lambda]
     B -->|Invalid| Z[Return Error]
-    
+
     C -->|Success| D{Payment Status}
-    C -->|Failure| E[Compensate: Refund<br/>Lambda]
-    
-    D -->|Approved| F[Update Inventory<br/>Lambda]
-    D -->|Pending| G[SQS Queue<br/>payment-queue]
+    C -->|Task error| E[Error Handler]
+
+    D -->|Approved| F[Reserve Inventory<br/>Lambda]
+    D -->|Pending| G[Wait State<br/>30 seconds]
     D -->|Declined| H[Notify Customer<br/>Lambda]
-    
+
     F -->|Success| I[Create Order Record<br/>DynamoDB]
-    F -->|Failure| J[Compensate: Rollback<br/>Lambda]
-    
-    G -->|Wait 30s| D
+    F -->|Failure| J[Compensate: Refund Payment<br/>Lambda]
+
+    G --> P[Check Payment Status<br/>Lambda]
+    P --> D
     I --> K[Send Confirmation<br/>Lambda]
     K --> L[End]
     H --> L
@@ -445,7 +452,7 @@ graph TB
 
 A workflow with several steps, conditional branches, retries, and compensating actions (e.g., refund the payment if the inventory update fails) quickly becomes unmanageable as nested try/catch blocks spread across chained Lambda functions — state tracking is manual, errors are easy to lose, and there's no way to see where a given execution actually is. Step Functions externalizes that control flow into a declarative state machine: branching, retry/backoff, and error handling become configuration instead of code, and every execution gets a visual history that makes debugging a stuck or failed workflow far faster than grepping CloudWatch Logs across multiple functions.
 
-**Trade-off:** state transitions cost money independently of Lambda invocations (`$25/M transitions` for Standard), and for a workflow that's just 1-2 steps with no branching, that overhead and the added indirection outweigh the benefit — a direct Lambda chain is cheaper and simpler.
+**Trade-off:** Standard Workflow state transitions are billed independently of Lambda invocations, while Express Workflows are billed by requests, duration, and memory. For a workflow with only one or two simple calls, the added orchestration can outweigh its benefit; compare current Regional pricing and operational requirements.
 
 ### Step Functions State Types
 
@@ -457,13 +464,12 @@ Built-in state types available in a Step Functions state machine definition.
 | `Choice` | Conditional branching | Rules with comparisons |
 | `Parallel` | Concurrent execution | Branches array |
 | `Wait` | Delay execution | Seconds, timestamp, timestampPath |
-| `Catch` | Error handling | ErrorEquals, Next |
-| `Retry` | Automatic retry | MaxAttempts, BackoffRate, Interval |
+| `Retry` / `Catch` fields | Error handling on Task, Parallel, and Map states | ErrorEquals, retry/backoff, fallback `Next` |
 | `Succeed` / `Fail` | Terminal states | Output, cause, error |
 
 ### When NOT to Use
 
-- Don't use for simple 1-2 step chains — direct Lambda invocation is cheaper and faster
+- Don't use for a trivial one- or two-call flow unless orchestration visibility or retry/state semantics justify it; compare the operational benefit, latency, and current Regional pricing with a direct call
 - Don't use Express for workflows needing human tasks or >5 min duration — use Standard
 
 ### Step Functions vs Direct Lambda Chaining
@@ -473,11 +479,11 @@ Trade-offs between orchestrating with Step Functions versus chaining Lambda call
 | Aspect | Step Functions Standard | Step Functions Express | Lambda Chain |
 |--------|----------------------|----------------------|--------------|
 | State management | Built-in, visual | Built-in, visual | Manual, code-based |
-| Error handling | Declarative catch/retry | Limited catch/retry | Try-catch per function |
+| Error handling | Declarative `Retry`/`Catch` | Declarative `Retry`/`Catch` | Try-catch per function |
 | Execution duration | Up to 1 year | Max 5 minutes | Max 15 minutes per Lambda |
-| Cost | $25/M transitions | $0.25/M executions | $0.20/M invocations |
-| Visibility | Execution history, X-Ray | Execution history | CloudWatch Logs only |
-| Human tasks | Supported (Lambda Task Notify) | Not supported | Not supported |
+| Cost basis | State transitions | Requests + duration + memory | Lambda requests + duration |
+| Visibility | Durable execution history; optional logging/X-Ray | CloudWatch Logs must be enabled for execution history; optional X-Ray | Application logs/traces |
+| Callback with task token | Supported | Not supported | Application-managed |
 | Best for | Complex workflows, long-running | Event processing, fast workflows | Simple, fast chains |
 
 ---
@@ -491,7 +497,7 @@ graph TB
     subgraph "WebSocket API"
         A[Client<br/>wss://] --> B[API Gateway<br/>WebSocket]
         B -->|$connect| C[Lambda<br/>Connection Handler]
-        B -->|$message| D[Lambda<br/>Message Router]
+        B -->|Custom route or $default| D[Lambda<br/>Message Router]
         B -->|$disconnect| E[Lambda<br/>Cleanup Handler]
     end
     
@@ -521,9 +527,11 @@ The routes triggered at each stage of a WebSocket connection and the Lambda acti
 | Route | Event | Lambda Action |
 |-------|-------|--------------|
 | `$connect` | Client connects | Store connection ID, authenticate |
-| `$message` | Client sends data | Route to appropriate handler |
+| `$default` | No matching route, or no route can be evaluated | Handle fallback or return an error |
 | `$disconnect` | Client disconnects | Clean up connection record |
-| Custom routes | API Gateway routing | Business logic processing |
+| Custom routes | Client sends data matching the route selection expression | Business logic processing |
+
+The `$disconnect` route is a best-effort notification. Also expire connection records with TTL or periodic cleanup, and remove stale records when `PostToConnection` returns `GoneException`.
 
 ### When NOT to Use
 
@@ -538,10 +546,22 @@ Common communication mistakes and the fix for each.
 
 | Anti-Pattern | Problem | Solution |
 |-------------|---------|----------|
-| **Lambda → Lambda sync chain > 3 deep** | Timeout cascade, cold start multiplication | Use Step Functions or SQS |
-| **Synchronous calls across regions** | High latency, timeout failures | Use async with SQS |
+| **Multi-hop Lambda sync chain** | Timeout cascade and coupled availability | Use Step Functions or asynchronous messaging |
+| **Synchronous calls across regions** | Added latency and a wider failure domain | Prefer EventBridge, SNS, SQS, or regional APIs when an immediate cross-Region response is unnecessary |
 | **Large payloads in API Gateway** | 10 MB limit, high cost | Upload to S3, pass presigned URL |
-| **No circuit breaker** | Cascading failures | Implement circuit breaker pattern |
-| **Blocking Lambda on external HTTP** | Timeout risk, thread blocking | Use async, set connection timeouts |
+| **Unbounded downstream calls** | Cascading failures and exhausted concurrency | Use bounded connect/read timeouts and retries; add a circuit breaker where repeated failures can cascade |
+| **Blocking Lambda on external HTTP** | Timeout and concurrency-exhaustion risk | Reuse connections and set bounded timeouts; use asynchronous processing when the response is not required |
 | **Tight coupling between services** | Hard to change, test, deploy | Use events, interfaces |
-| **No request correlation ID** | Impossible to trace requests | Pass X-Request-ID through all services |
+| **No request correlation ID** | Harder to correlate logs and traces | Propagate a stable correlation or trace ID through supported services |
+
+## Authoritative References
+
+- [AWS AppSync quotas](https://docs.aws.amazon.com/general/latest/gr/appsync.html)
+- [Lambda quotas](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html)
+- [API Gateway quotas for REST APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html)
+- [API Gateway usage plans and API keys](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-api-usage-plans.html)
+- [Configuring SQS event source mappings for Lambda](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html)
+- [Lambda asynchronous invocation destinations](https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-retain-records.html)
+- [Choosing a Step Functions workflow type](https://docs.aws.amazon.com/step-functions/latest/dg/choosing-workflow-type.html)
+- [API Gateway WebSocket API overview](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api-overview.html)
+- [WebSocket API routes and integrations](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api-routes-integrations.html)

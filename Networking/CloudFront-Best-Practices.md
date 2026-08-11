@@ -10,15 +10,15 @@
 | **Custom Origin** | Any HTTP/HTTPS endpoint | Application servers |
 | **Load Balancer** | ALB/NLB as origin | Dynamic content, apps |
 | **VPC Origins** | Private ALB/NLB/EC2 in a VPC, reached via AWS-managed private tunnel | Serve private-subnet origins without exposing them publicly |
-| **CloudFront Origin Access** | OAC/OAI for S3 | Secure S3 access |
+| **Origin Access Control** | SigV4-signed access to supported AWS origins, including S3 and Lambda function URLs | Keep supported origins private |
 | **MediaStore** | Media content | Video, images |
-| **Lambda@Edge** | Edge computation | Dynamic content |
+| **Origin group** | Primary and secondary origins with failover criteria | Origin failover |
 
 ### Origin Access Control
 
 | Method | Description | Recommendation |
 |--------|-------------|----------------|
-| **OAC (Origin Access Control)** | New, supports S3 and custom origins | **Preferred** |
+| **OAC (Origin Access Control)** | SigV4 signing for supported origin types; support and setup vary by origin | **Preferred for supported origins** |
 | **OAI (Origin Access Identity)** | Legacy, S3 only | Migrate to OAC |
 | **Signed URLs** | Time-limited access | Premium content |
 | **Signed Cookies** | Session-based access | Member-only content |
@@ -40,12 +40,14 @@
 | **Forward headers** | Only if needed for variation | Reduce cache fragmentation |
 | **Forward query strings** | Only if needed for variation | Reduce cache fragmentation |
 
+If a cache policy has a minimum TTL greater than zero, CloudFront can cache for at least that duration even when the origin sends `Cache-Control: no-cache`, `no-store`, or `private`. Use a zero minimum TTL for responses whose origin directives must prevent caching.
+
 ### Cache Key Optimization
 
 | Element | Forward? | When to Include |
 |---------|----------|----------------|
-| **Host header** | Yes (default) | Always needed |
-| **Path** | Yes (default) | Always needed |
+| **Distribution domain and URL path** | Always | Default cache key components |
+| **Viewer `Host` header** | No | Include only when different hostnames intentionally produce different objects and the origin design supports it |
 | **Query strings** | Whitelist only | When content varies by param |
 | **Cookies** | Whitelist only | When content is personalized |
 | **Headers** | Specific only | When content varies by header |
@@ -76,7 +78,7 @@
 
 | Feature | Description | Use Case |
 |---------|-------------|----------|
-| **Encryption configs** | Encrypt specific headers/fields | PII protection |
+| **Encryption configs** | Encrypt named fields in supported POST form requests | Protect selected sensitive fields end to end |
 | **Public key** | Uploaded to CloudFront | Field encryption |
 | **Private key** | Held by origin | Field decryption |
 | **Use case** | Credit cards, SSN, etc. | PCI compliance |
@@ -92,13 +94,13 @@
 | **Enable Origin Shield** | For high-traffic distributions |
 | **Region** | Choose region closest to origin |
 | **Purpose** | Reduce origin load, aggregate cache |
-| **Cost** | Additional data transfer cost |
+| **Cost** | Additional Origin Shield request charges and potentially data-transfer charges; model by Region and origin |
 
 ### Benefits
 
 | Benefit | Description |
 |---------|-------------|
-| **Origin protection** | Reduces origin requests by 50-90% |
+| **Origin protection** | Adds a centralized cache layer that can reduce duplicate origin requests; measure the actual effect |
 | **Cache aggregation** | Single cache layer between edges and origin |
 | **Cost reduction** | Less data transfer to origin |
 | **Performance** | Reduced origin latency impact |
@@ -138,14 +140,14 @@ sequenceDiagram
 | **AWS WAF** | Web Application Firewall |
 | **Managed rules** | AWS-managed rule groups |
 | **Custom rules** | Application-specific rules |
-| **Rate-based rules** | DDoS protection |
+| **Rate-based rules** | Limit abusive or excessive layer-7 request rates; combine with Shield and resilient origin design for DDoS protection |
 | **Geo-match** | Country-based blocking |
 
 ### Security Headers
 
 | Header | Value | Purpose |
 |--------|-------|---------|
-| Strict-Transport-Security | max-age=31536000; includeSubDomains | HSTS |
+| Strict-Transport-Security | Choose an appropriate `max-age`; add `includeSubDomains` only when every subdomain is HTTPS-ready | HSTS |
 | X-Content-Type-Options | nosniff | MIME sniffing prevention |
 | X-Frame-Options | DENY | Clickjacking prevention |
 | X-XSS-Protection | (deprecated, browsers ignore) | Remove — use CSP instead |
@@ -156,7 +158,7 @@ sequenceDiagram
 
 | Header | Recommendation |
 |--------|---------------|
-| **Strict-Transport-Security** | Always enable |
+| **Strict-Transport-Security** | Enable for production HTTPS domains after confirming the chosen scope and subdomains are HTTPS-ready |
 | **X-Content-Type-Options** | nosniff |
 | **X-Frame-Options** | DENY or SAMEORIGIN |
 | **Content-Security-Policy** | Application-specific |
@@ -170,13 +172,14 @@ sequenceDiagram
 
 | Feature | Lambda@Edge | CloudFront Functions |
 |---------|-------------|---------------------|
-| **Runtime** | Node.js, Python, Ruby | Custom JavaScript (subset) |
-| **Execution time** | Up to 30 seconds (25s in some regions) | Milliseconds (sub-ms typical) |
-| **Memory** | Up to 3,008 MB | 1 MB |
-| **Payload** | Up to 1 MB request/response | 128 KB |
+| **Runtime** | Supported Node.js and Python Lambda runtimes | CloudFront JavaScript runtime |
+| **Execution time** | Up to 30 seconds | Submillisecond execution target |
+| **Memory** | 128 MB for viewer events; up to 10,240 MB for origin events | 2 MB |
+| **Request body / generated response** | Request body available with event-specific truncation limits; generated response is 40 KB (viewer) or 1 MB (origin) | No request-body access; function code is limited to 10 KB |
 | **Cold starts** | Yes | No |
-| **Cost** | Lambda pricing | $0.40 per M invocations |
+| **Cost** | Lambda@Edge request and duration pricing | CloudFront Functions invocation pricing; verify current rates |
 | **Use case** | Complex logic | Simple header/query manipulation |
+| **Key-value data** | No CloudFront KeyValueStore integration | CloudFront KeyValueStore is available with supported JavaScript runtime versions |
 
 ### Use Cases
 
@@ -188,36 +191,23 @@ sequenceDiagram
 | **Origin Response** | Modify responses from origin | Error page customization |
 
 ```mermaid
-graph LR
-    subgraph Viewer
-        A[Viewer Request]
-        B[Viewer Response]
-    end
-    subgraph Edge
-        A --> B
-    end
-    subgraph Origin
-        C[Origin Request]
-        D[Origin Response]
-    end
-    B --> C
-    C --> D
-    D --> B
+flowchart LR
+    V[Viewer] --> VR[Viewer request event]
+    VR --> C{Cache hit?}
+    C -->|Yes| VP[Viewer response event]
+    C -->|No| ORQ[Origin request event]
+    ORQ --> O[Origin]
+    O --> ORS[Origin response event]
+    ORS --> CACHE[Store cacheable response]
+    CACHE --> VP
+    VP --> V
 
-    style A fill:#4ade80,color:#000
-    style B fill:#4ade80,color:#000
-    style C fill:#f87171,color:#000
-    style D fill:#f87171,color:#000
-
-    note1[CloudFront Functions] --> A
-    note1 --> B
-    note2[Lambda@Edge] --> A
-    note2 --> B
-    note2 --> C
-    note2 --> D
-
-    style note1 fill:#93c5fd,color:#000
-    style note2 fill:#fbbf24,color:#000
+    CF[CloudFront Functions] -.->|viewer events| VR
+    CF -.->|viewer events| VP
+    LE[Lambda at Edge] -.->|all four event types| VR
+    LE -.-> VP
+    LE -.-> ORQ
+    LE -.-> ORS
 ```
 
 ---
@@ -228,20 +218,19 @@ graph LR
 
 | Metric | Description | Alert Threshold |
 |--------|-------------|----------------|
-| Requests | Total requests | Baseline + 3σ |
-| 4XX/5XX Errors | Error rate | > 1% of requests |
+| Requests | Total requests | Workload baseline/anomaly |
+| 4xxErrorRate / 5xxErrorRate / TotalErrorRate | Error percentages | SLO/error-budget threshold |
 | Bytes Downloaded | Data transfer | Baseline tracking |
-| Latency | Response time | > 500ms p99 |
-| Origin Latency | Origin response time | > 1s p99 |
-| Cache Hit Rate | Cache efficiency | < 80% for static content |
-| 499 Errors | Client aborts | > 1% of requests |
+| OriginLatency (additional metric) | Time from CloudFront request to origin response | Workload SLO/baseline |
+| CacheHitRate (additional metric) | Cacheable-request hit ratio | Content-specific target |
+| Status/result types in access logs | Includes detailed outcomes such as client disconnects | Query logs; there is no dedicated standard `499 Errors` metric |
 
 ### Real-Time Logs
 
 | Feature | Description |
 |---------|-------------|
 | **Kinesis Data Streams** | Real-time logs are delivered to a Kinesis data stream within seconds (not directly to CloudWatch Logs); fan out from there to S3/OpenSearch/Lambda via Kinesis Data Firehose |
-| **S3 logs** | Standard (non-real-time) access logs delivered to S3 |
+| **Standard logs v2** | Deliver configurable fields and formats to CloudWatch Logs, Firehose, or S3; legacy standard logging is S3-only |
 | **Fields** | Customizable log fields, with a configurable sampling rate |
 | **Cost** | Additional cost for real-time (Kinesis) delivery |
 
@@ -255,7 +244,7 @@ graph LR
 | **Origin Shield** | Reduce origin transfer | Origin cost reduction |
 | **Compression** | Enable automatic compression | Transfer reduction |
 | **Price class** | Choose appropriate class | Edge location cost |
-| **HTTP/2 and HTTP/3** | Better compression | Transfer reduction |
+| **HTTP/2 and HTTP/3** | Connection multiplexing and modern transport behavior | Performance; not a direct byte-cost guarantee |
 | **Field-level encryption** | Only encrypt sensitive fields | Processing cost |
 
 ### Price Classes
@@ -268,12 +257,7 @@ graph LR
 
 ### Data Transfer Costs
 
-| Direction | Price (per GB, US East) |
-|-----------|------------------------|
-| **To viewer** | $0.085/GB (first 10 TB, Price Class All) |
-| **To S3 origin** | $0.00/GB (AWS backbone) |
-| **To custom origin** | Varies by region (data transfer out from origin) |
-| **From origin** | $0.00/GB (AWS backbone, S3 only) |
+CloudFront pricing varies by viewer geography, usage tier or flat-rate plan, request type, origin, and optional features. Do not encode a single per-GB figure as an architectural constant. Review the current pricing page and model viewer transfer, origin transfer, invalidations, logs, Origin Shield, and edge-compute charges together.
 
 ---
 
@@ -281,11 +265,30 @@ graph LR
 
 | Service | Integration | Purpose |
 |---------|------------|---------|
-| S3 | Static content origin | Website hosting |
+| S3 | Bucket REST origin for private static content, or website endpoint as a public custom origin | Static applications and assets |
 | WAF | Security rules | DDoS, SQL injection protection |
 | Lambda@Edge | Edge computation | Dynamic content |
 | CloudWatch | Logging, metrics | Monitoring |
 | ACM | SSL/TLS certificates | HTTPS termination |
 | Route 53 | DNS routing | Domain management |
 | Shield | DDoS protection | Advanced DDoS mitigation |
-| Inspector | Web application scanning | Security assessment |
+| AWS Config / CloudTrail | Configuration checks and API audit | Governance |
+
+---
+
+## Additional Best Practices
+
+- Redirect viewers to HTTPS and use an ACM viewer certificate in `us-east-1`; origin certificates follow the origin service/Region requirements.
+- Keep S3 bucket origins private with OAC and an explicit bucket policy scoped to the distribution. An S3 website endpoint is a custom origin and cannot use OAC/OAI.
+- Use managed cache and origin-request policies where they fit. Forward values to the origin without adding them to the cache key when they do not change the response.
+- Prefer content-addressed or versioned object names for releases. Use invalidations for urgent removals, not as the routine cache-busting mechanism.
+- Configure origin groups for eligible failure modes, and test that the secondary origin has equivalent content, capacity, and security controls.
+- Protect origins from direct access with VPC origins, OAC where supported, or an origin-verification control such as a secret custom header plus WAF; rotate shared secrets.
+
+## AWS References
+
+- [CloudFront origins and VPC origins](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistS3AndCustomOrigins.html)
+- [Understanding the CloudFront cache key](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/understanding-the-cache-key.html)
+- [CloudFront Functions and Lambda@Edge comparison](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/edge-functions-choosing.html)
+- [CloudFront standard logging v2](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/standard-logging.html)
+- [CloudFront certificate requirements](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html)

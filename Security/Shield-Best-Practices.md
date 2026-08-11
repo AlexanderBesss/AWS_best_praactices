@@ -1,263 +1,143 @@
-# Shield Best Practices
+# AWS Shield Best Practices
 
-## Shield vs Shield Advanced
+AWS Shield protects AWS-hosted applications from distributed denial-of-service (DDoS) attacks. Shield does not replace AWS WAF, resilient architecture, capacity planning, or an incident-response process.
 
-### Feature Comparison
+## Shield Standard and Shield Advanced
 
-| Feature | Shield Standard | Shield Advanced |
-|---------|----------------|-----------------|
-| **Availability** | Automatic, included | Automatic, subscription |
-| **DDoS Protection** | Common volumetric | All attack types |
-| **WAF Integration** | Basic | Advanced rules |
-| **AWS Response Team** | No | 24/7 DRT access |
-| **Attack Insights** | Basic | Detailed analytics |
-| **Cost Protection** | No | Abuse cost reimbursement |
-| **Event Response** | Automated | Human + automated |
-| **Health Dashboard** | No | Yes |
-| **Price** | Free | $3,000/month + usage |
+| Capability | Shield Standard | Shield Advanced |
+|---|---|---|
+| Enrollment | Included automatically with AWS accounts | Paid subscription with a commitment; enroll and protect resources explicitly |
+| Core protection | Automatic network and transport-layer DDoS detection and inline mitigation for supported AWS services | Enhanced detection and mitigation, visibility, health-based detection, and protected-resource controls |
+| Application layer | Use AWS WAF separately | AWS WAF is central to layer 7 protection; automatic application-layer DDoS mitigation is available for eligible CloudFront and ALB protections |
+| Visibility | Service-level protections with limited customer event detail | DDoS event diagnostics, CloudWatch metrics, dashboards, and notifications |
+| Response support | Normal AWS Support path | Shield Response Team (SRT) assistance when support-plan prerequisites are met |
+| Cost protection | Not included | DDoS cost protection for eligible scaling charges, subject to prerequisites and credit approval |
+| Organization management | Not applicable | AWS Firewall Manager can apply policy centrally to supported resource types |
 
-### When to Use Shield Advanced
+Do not describe Shield Advanced as protecting against every attack. It focuses on DDoS; injection, credential abuse, authorization flaws, malware, and data exposure require other controls.
 
-| Criteria | Recommendation |
-|----------|---------------|
-| Public-facing applications | **Recommended** |
-| Revenue-critical workloads | **Recommended** |
-| High-profile targets | **Required** |
-| Compliance requirements | **Recommended** |
-| Internal-only applications | Not needed |
-| Low-risk workloads | Shield Standard sufficient |
+### When Shield Advanced Is a Good Fit
 
----
+- Internet-facing workloads where availability has a material business or safety impact.
+- Applications with a high likelihood or history of DDoS targeting.
+- Organizations that need SRT engagement, detailed DDoS visibility, or DDoS cost protection.
+- Multi-account estates that need centrally governed protection through AWS Firewall Manager.
 
-## Protection Strategies
+Evaluate the current subscription, support-plan, WAF, and cost-protection requirements before purchasing. “Public-facing” alone does not make Shield Advanced mandatory.
 
-### Layered Defense
+## Supported Resources and Scope
 
-| Layer | Service | Purpose |
-|-------|---------|---------|
-| **Network (L3/L4)** | Shield, Route 53 | Volumetric attacks |
-| **Transport (L4)** | Shield, NLB | Protocol attacks |
-| **Application (L7)** | WAF, Shield Advanced | Application attacks |
-| **Identity** | IAM, Cognito | Credential attacks |
-| **Data** | KMS, Macie | Data protection |
+Shield Standard protections apply automatically to supported AWS edge and regional entry points. Shield Advanced can create explicit protections for the following resource types documented by AWS:
+
+| Resource | Shield Advanced guidance |
+|---|---|
+| CloudFront distribution | Preferred public HTTP(S) entry point; associate AWS WAF and consider automatic application-layer DDoS mitigation |
+| Route 53 hosted zone | Protect authoritative DNS and monitor DNS-query health |
+| Global Accelerator standard accelerator | Use for static anycast entry points and origin shielding for supported endpoints |
+| Elastic IP address | Protect the EIP and the resource exposed through it |
+| Application Load Balancer | Protect the ALB; associate a regional web ACL for layer 7 controls |
+| Classic Load Balancer | Explicitly protect when still required; prefer modern load balancers for new designs |
+| Network Load Balancer | Protect through its associated Elastic IP addresses; AWS WAF does not associate with NLBs |
+
+A VPC, EC2 instance without an eligible entry-point resource, web ACL, or API Gateway API is not itself a Shield Advanced protected-resource type. API Gateway can be protected at layer 7 with AWS WAF (REST APIs) or placed behind CloudFront where appropriate.
+
+Shield Advanced resource protection supports IPv4, not IPv6. If the application accepts IPv6, document the exposure and verify the current service behavior and compensating edge architecture.
+
+## Layered DDoS-Resilient Architecture
 
 ```mermaid
-flowchart TD
-    subgraph L7["Layer 7 - Application"]
-        W["WAF\n(rule groups, rate-based, CAPTCHA)"]
-    end
-    subgraph L4["Layer 4 - Transport"]
-        NL["NLB / Shield\n(SYN flood, connection flood)"]
-    end
-    subgraph L3["Layer 3 - Network"]
-        SC["Shield + Route 53\n(absorption, scrubbing, blackhole)"]
-    end
-    In["Internet / Attack Traffic"] --> L3
-    L3 -->|"scrubbed"| L4
-    L4 -->|"clean"| L7
-    L7 -->|"allowed"| App["Application"]
-    In -->|"UDP flood"| SC
-    In -->|"SYN flood"| NL
-    In -->|"HTTP flood"| W
+flowchart LR
+    U["Clients"] --> R53["Route 53"]
+    R53 --> CF["CloudFront + Shield"]
+    CF --> WAF["AWS WAF web ACL"]
+    WAF --> O["ALB or API origin"]
+    O --> A["Auto Scaling application"]
+    A --> D["Protected data tier"]
+    CW["CloudWatch alarms"] -. observes .-> CF
+    CW -. observes .-> O
+    SRT["Shield Response Team"] -. assists .-> WAF
 ```
 
-### Attack Types and Mitigation
+| Layer | Controls |
+|---|---|
+| Edge and DNS | Route 53, CloudFront, Global Accelerator, anycast ingress, and Shield |
+| Network/transport | Shield mitigation, NLB/ALB, security groups, and minimal exposed ports |
+| Application | AWS WAF managed/custom rules, rate-based rules, CAPTCHA/Challenge, caching, and origin protection |
+| Capacity and health | Auto Scaling, resilient multi-AZ origins, dependency limits, Route 53 health checks, and load shedding |
+| Operations | Metrics, alarms, SNS notifications, runbooks, AWS Support/SRT access, and game days |
 
-| Attack Type | Layer | Mitigation | Service |
-|-------------|-------|-----------|---------|
-| **UDP Flood** | Network | Absorption, scrubbing | Shield |
-| **SYN Flood** | Transport | SYN cookies, absorption | Shield |
-| **HTTP Flood** | Application | Rate limiting, CAPTCHA | WAF + Shield |
-| **Slowloris** | Application | Connection limits | WAF |
-| **DNS Amplification** | Network | Response rate limiting | Shield |
-| **NTP Amplification** | Network | Scrubbing | Shield |
-| **Reflection Attacks** | Network | Scrubbing, blackhole | Shield |
-| **CC Attacks** | Application | Rate-based rules | WAF |
+- Hide and restrict origins. For CloudFront origins, allow only CloudFront-originated traffic using supported managed prefix lists, secret headers where appropriate, or service-specific origin access controls.
+- Cache safe content at CloudFront to absorb request volume before it reaches the origin.
+- Set WAF rate limits from measured legitimate traffic and test rules in Count mode before enforcing them.
+- Protect dependencies from a successful traffic surge using queues, concurrency controls, circuit breakers, and admission control.
+- Avoid relying on network ACLs as a dynamic DDoS control; they are stateless, coarse, and operationally difficult to change during an event.
 
----
+## Shield Advanced Setup
 
-## Resource Association
+| Step | Best practice |
+|---|---|
+| Subscription ownership | Use a designated security account and document the payer/commitment model |
+| Protection coverage | Inventory every eligible internet-facing entry point and automate association for new resources |
+| Protection groups | Group resources that share a workload so events and health can be evaluated coherently |
+| Health checks | Associate meaningful Route 53 health checks where supported; health-based detection depends on accurate signals |
+| Application-layer mitigation | For eligible CloudFront/ALB protections, enable automatic mitigation only after the associated web ACL and baseline are ready |
+| SRT access | Proactively authorize the SRT to inspect and update WAF protections; confirm required AWS Support plan |
+| Notifications | Configure Shield Advanced SNS event notifications and CloudWatch alarms |
+| Organization rollout | Use Firewall Manager for supported resources; manage Route 53 and Global Accelerator protections separately because Firewall Manager Shield policies do not support them |
 
-### Protectable Resources
-
-| Resource | Shield Standard | Shield Advanced |
-|----------|----------------|-----------------|
-| **CloudFront distributions** | Yes | Yes |
-| **Elastic IPs** | Yes | Yes |
-| **ALB** | Yes | Yes |
-| **NLB** | Yes | Yes |
-| **Global Accelerator** | Yes | Yes |
-| **VPC** | No | No (not a directly protected resource type; protect via associated EIPs/ALB/NLB) |
-| **AWS WAF** | Yes | Yes |
-| **Route 53** | Yes | Yes |
-
-### Association Best Practices
-
-| Practice | Description |
-|----------|-------------|
-| **Protect all public resources** | Associate all internet-facing resources |
-| **New resource automation** | Auto-associate via CloudFormation/CDK |
-| **Regular audit** | Check for unprotected resources |
-| **Tag protected resources** | Track Shield coverage |
-| **Document protection scope** | Know what is protected |
-
----
-
-## Attack Response
-
-### Response Workflow
-
-| Phase | Action | Responsible |
-|-------|--------|-------------|
-| **Detection** | Automated detection by AWS | AWS Shield |
-| **Notification** | SNS, EventBridge alerts | Shield Advanced |
-| **Mitigation** | Automated traffic scrubbing | AWS Shield |
-| **Communication** | DRT contact for Advanced | AWS DRT |
-| **Analysis** | Post-attack review | AWS + Customer |
-| **Hardening** | Apply lessons learned | Customer |
+## Detection, Response, and Testing
 
 ```mermaid
 sequenceDiagram
-    participant Atk as Attack
-    participant Shield as AWS Shield
-    participant CW as CloudWatch
-    participant EB as EventBridge
-    participant SNS as SNS
-    participant DRT as AWS DRT
-    participant Cust as Customer
-
-    Atk->>Shield: DDoS traffic detected
-    Shield->>Shield: Auto-mitigation starts
-    Shield->>CW: Publish attack metrics
-    Shield->>EB: Attack event
-    EB->>SNS: Alert notification
-    SNS->>Cust: Attack notification
-    Cust->>DRT: Contact DRT (Advanced)
-    DRT->>Cust: Analysis + guidance
-    Shield->>Shield: Attack ends
-    Shield->>Cust: Post-attack report
+    participant Shield as Shield Advanced
+    participant CW as CloudWatch/SNS
+    participant Team as Incident team
+    participant Support as AWS Support/SRT
+    Shield->>CW: Publish event and DDoS metrics
+    CW->>Team: Alarm and notify
+    Team->>Team: Validate application health and attack scope
+    Team->>Support: Open/upgrade support case if assistance is needed
+    Support->>Team: SRT analysis and mitigation guidance
+    Team->>Team: Tune WAF/capacity and preserve evidence
+    Team->>Team: Review event, costs, and runbook
 ```
 
-### DRT (Detection and Response Team)
+Before an event:
 
-| Feature | Description |
-|---------|-------------|
-| **24/7 availability** | Always-on support |
-| **Technical expertise** | DDoS specialists |
-| **Direct contact** | Dedicated phone/chat |
-| **Attack analysis** | Detailed post-attack reports |
-| **Mitigation guidance** | Custom recommendations |
-| **Cost protection** | Abuse cost reimbursement |
+- Record resource ARNs, application owners, support contacts, escalation severity, and the AWS Support case procedure.
+- Confirm SRT authorization rather than waiting for an incident.
+- Run controlled game days. Do **not** generate DDoS traffic or use a load-testing vendor without following AWS's DDoS simulation testing policy and obtaining any required approval.
+- Test alarms against application health degradation as well as traffic volume.
 
----
+During an event, Shield mitigation is automatic. Contact AWS Support when application health is affected, mitigation needs tuning, the event is not visible, or you require SRT assistance. Preserve timestamps, resource ARNs, health symptoms, request samples, and WAF logs.
 
 ## Monitoring
 
-### Shield Metrics
+Shield Advanced publishes metrics in `AWS/DDoSProtection`. Global-service and protection-group metrics are reported in `us-east-1`; regional-resource metrics are reported in the resource's Region.
 
-| Metric | Description | Alert |
-|--------|-------------|-------|
-| AbsoluteBytes | Total traffic volume | Spike detection |
-| AbsolutePackets | Total packet count | Spike detection |
-| AttackBytes | Attack traffic volume | Attack detection |
-| AttackPackets | Attack packet count | Attack detection |
-| AttackVectors | Number of attack vectors | Attack complexity |
-| MitigatedBytes | Mitigated traffic | Mitigation effectiveness |
-| MitigatedPackets | Mitigated packets | Mitigation effectiveness |
+| Metric | Use |
+|---|---|
+| `DDoSDetected` | Alarm when nonzero, then correlate with health and traffic; nonzero does not by itself prove customer impact |
+| `DDoSAttackBitsPerSecond` | Network/transport event volume in bits per second |
+| `DDoSAttackPacketsPerSecond` | Network/transport event packet rate |
+| `DDoSAttackRequestsPerSecond` | Application-layer request-flood rate when available |
+| `VolumePacketsPerSecond` / `VolumeBitsPerSecond` | Mitigation and top-contributor visibility with the documented dimensions |
 
-### Event Monitoring
+Also monitor ALB/CloudFront/Route 53 health, origin latency/error rates, WAF `AllowedRequests`, `BlockedRequests`, `CountedRequests`, and dependency saturation. Shield metrics are more frequent during an event and otherwise can be reported only periodically, so they should not be the sole application-health signal.
 
-| Event | Description | Action |
-|-------|-------------|--------|
-| Attack started | New attack detected | Monitor, contact DRT |
-| Attack mitigated | Attack being mitigated | Verify mitigation |
-| Attack ended | Attack concluded | Post-attack review |
-| Resource associated | New resource protected | Verify configuration |
-| Resource disassociated | Resource unprotected | Investigate |
+## Cost Protection and Pricing
 
-### CloudWatch Integration
+Shield Advanced pricing, data-transfer inclusions, and DDoS cost-protection eligibility can change and differ by resource or agreement. Use the current pricing and cost-protection pages instead of embedding packet, bandwidth, or regional prices.
 
-| Integration | Description |
-|-------------|-------------|
-| **Shield metrics** | Published to CloudWatch |
-| **Custom alarms** | Attack detection alarms |
-| **Dashboards** | Security monitoring dashboards |
-| **Logs** | Attack event logging |
-| **Events** | EventBridge attack events |
+To remain eligible for DDoS cost protection, follow the documented architecture and operational prerequisites, including appropriate Shield Advanced protection, WAF protection for application-layer resources, and timely SRT engagement where required. Cost protection is a credit process, not automatic reimbursement for every charge.
 
----
+## Authoritative References
 
-## Cost Considerations
-
-### Shield Advanced Pricing
-
-| Component | Price |
-|-----------|-------|
-| **Monthly subscription** | $3,000/month minimum + $0.034/GB beyond allowance |
-| **Usage beyond allowance** | $0.034/GB (network), $0.000015/packet |
-| **Included allowance** | 1 TB/second, 5 M pps (varies by resource type) |
-| **Cost protection** | Reimbursement for abuse costs |
-| **Multi-region** | Per-region pricing |
-
-### Cost Optimization
-
-| Strategy | Description |
-|----------|-------------|
-| **Right-size protection** | Only protect internet-facing resources |
-| **Cost protection benefit** | Abuse cost reimbursement |
-| **WAF integration** | Reduce L7 attack impact |
-| **Architecture hardening** | Reduce attack surface |
-| **Regular review** | Optimize protected resources |
-
-### Cost-Benefit Analysis
-
-| Factor | Consideration |
-|--------|---------------|
-| **Revenue impact** | Downtime cost vs Shield cost |
-| **Reputation risk** | Brand damage from attacks |
-| **Compliance** | Regulatory requirements |
-| **Attack likelihood** | Industry targeting risk |
-| **Cost protection** | Potential abuse cost savings |
-
----
-
-## Architecture Recommendations
-
-### Recommended Architecture
-
-| Component | Configuration |
-|-----------|---------------|
-| **CloudFront** | Shield Advanced + WAF |
-| **WAF** | Managed rules + rate-based |
-| **Route 53** | Health checks + failover |
-| **ALB/NLB** | Shield Advanced association |
-| **Global Accelerator** | Shield Advanced association |
-| **EC2 instances** | Protect indirectly via associated Elastic IP |
-| **Security groups** | Least privilege rules |
-| **NACLs** | Explicit deny rules |
-
-### Multi-Region Protection
-
-| Setting | Recommendation |
-|---------|---------------|
-| **Enable in all regions** | Where resources exist |
-| **Centralized management** | Organization-level |
-| **Cross-region monitoring** | Centralized CloudWatch |
-| **DR plan** | Include DDoS scenarios |
-| **Testing** | Regular DR drills |
-
----
-
-## Cross-Service Integration
-
-| Service | Integration | Purpose |
-|---------|------------|---------|
-| WAF | Application-layer protection | L7 attack mitigation |
-| CloudFront | Edge protection | Global DDoS mitigation |
-| Route 53 | DNS protection | DNS attack mitigation |
-| CloudWatch | Metrics, alarms | Monitoring |
-| EventBridge | Attack events | Automation |
-| SNS | Notifications | Alerting |
-| Config | Compliance rules | Governance |
-| GuardDuty | Threat detection | Security findings |
-| Security Hub | Centralized findings | Compliance |
+- [AWS Shield features](https://docs.aws.amazon.com/waf/latest/developerguide/shield-chapter.html)
+- [Resources supported by Shield Advanced](https://docs.aws.amazon.com/waf/latest/developerguide/ddos-resource-protections.html)
+- [Shield Advanced metrics](https://docs.aws.amazon.com/waf/latest/developerguide/shield-metrics.html)
+- [Shield Response Team support](https://docs.aws.amazon.com/waf/latest/developerguide/authorize-srt.html)
+- [Automatic application-layer DDoS mitigation](https://docs.aws.amazon.com/waf/latest/developerguide/ddos-automatic-app-layer-response.html)
+- [AWS best practices for DDoS resiliency](https://docs.aws.amazon.com/whitepapers/latest/aws-best-practices-ddos-resiliency/welcome.html)
+- [AWS DDoS simulation testing policy](https://aws.amazon.com/security/ddos-simulation-testing/)
+- [AWS Shield pricing](https://aws.amazon.com/shield/pricing/)

@@ -26,15 +26,15 @@ How AWS's database services compare for Lambda integration, connection model, an
 
 | Database | Type | Best For | Lambda Integration | Connection Model |
 |----------|------|----------|-------------------|-----------------|
-| **DynamoDB** | NoSQL Key-Value | Low-latency, high-scale, simple queries | Native trigger, SDK | HTTP (no connections) |
-| **Aurora Serverless v2** | Relational (MySQL/PostgreSQL) | Complex queries, transactions, schema | RDS Proxy required | Connection pooling |
-| **RDS** | Relational | Known scale, compliance | RDS Proxy required | Connection pooling |
-| **Aurora Global DB** | Relational (multi-region) | Global read, disaster recovery | RDS Proxy per region | Connection pooling |
-| **DocumentDB** | Document (MongoDB compat) | Document storage, flexible schema | Built-in connection pooling | Enhanced networking |
-| **Neptune** | Graph | Relationship queries, graphs | Direct SDK (HTTP) | HTTP connections (Gremlin/SPARQL) |
-| **ElastiCache** | In-memory cache | Caching, session store | Direct SDK | Connection pooling |
-| **Redshift Serverless** | Data warehouse | Analytics, BI | Direct SDK | Connection pooling |
-| **Timestream** | Time-series | IoT, metrics, logs | Direct SDK | HTTP (no connections) |
+| **DynamoDB** | NoSQL key-value/document | Low-latency, high-scale access by designed keys/indexes | Native stream trigger, SDK | HTTPS API; reusable HTTP connections but no persistent database session |
+| **Aurora Serverless v2** | Relational (MySQL/PostgreSQL) | Complex queries, transactions, schema | Direct connection, RDS Proxy, or RDS Data API where supported | Stateful connections or HTTP Data API |
+| **RDS** | Relational | Known scale, relational integrity | Direct connection or RDS Proxy | Stateful connections; proxy is optional |
+| **Aurora Global Database** | Relational (multi-Region) | Global reads and disaster recovery with one writer Region | Direct endpoints or RDS Proxy deployed in each application Region | Stateful connections; secondary write forwarding still executes in the primary Region |
+| **DocumentDB** | Document (MongoDB compatibility) | Document storage, flexible schema | MongoDB-compatible driver; reuse its pool | Stateful TLS connections |
+| **Neptune** | Graph | Relationship queries, graphs | Gremlin, openCypher, or SPARQL clients | Protocol-specific connections |
+| **ElastiCache** | In-memory cache | Caching, session store | Valkey/Redis OSS or Memcached client | Stateful connections/pooling |
+| **Redshift Serverless** | Data warehouse | Analytics, BI | Driver or Redshift Data API | Stateful connection or HTTP Data API |
+| **Timestream** | Time-series | IoT, metrics, logs | Direct SDK | HTTPS API; no persistent database session |
 
 ---
 
@@ -52,8 +52,9 @@ graph TB
     
     subgraph "Read Path"
         E[API Gateway] --> F[Lambda<br/>Read Handler]
-        F -->|GetItem / Query| C
-        F -->|DAX Cache| G[DAX Cluster<br/>Optional Cache Layer]
+        F -->|GetItem / Query| G[DAX Cluster<br/>Optional Cache Layer]
+        G -->|Cache miss or strong read| C
+        F -.->|Without DAX| C
     end
     
     subgraph "Event Processing"
@@ -66,7 +67,7 @@ graph TB
 
 ### Why This Pattern?
 
-DynamoDB's HTTP-based API means Lambda never holds a stateful connection, so there is no connection pool to exhaust and no cold-start penalty from establishing a database session — each invocation just signs and sends a request over the SDK's shared HTTP client. This removes the entire class of concurrency-scaling problems that come with relational databases: a burst to thousands of concurrent Lambda executions doesn't threaten a fixed connection limit, and there's no proxy tier to size or operate. The tight coupling of API Gateway, Lambda, and DynamoDB with Streams also gives a built-in way to fan out change events without polling or building custom notification logic.
+DynamoDB's HTTPS API does not require a persistent database session, so there is no database connection pool to exhaust or relational login handshake for each new Lambda execution environment. SDK clients should still be initialized outside the handler so their HTTP connections can be reused; DNS, TLS, signing, and network latency still exist. A concurrency burst is instead constrained by Lambda concurrency, DynamoDB throughput/quotas, hot partitions, and downstream capacity. DynamoDB Streams also provides a managed item-change feed without table polling.
 
 **Trade-off:** you give up SQL joins, ad hoc query flexibility, and multi-table transactions with arbitrary predicates — every access pattern has to be designed up front around partition/sort keys and GSIs, and retrofitting a new query shape later often means a table redesign or a costly Scan. If the workload needs relational integrity, complex reporting queries, or schema flexibility for evolving query patterns, this pattern forces expensive rework rather than a config change.
 
@@ -76,14 +77,14 @@ Recommended DynamoDB settings and features to use when paired with Lambda.
 
 | Practice | Detail |
 |----------|--------|
-| **Use Provisioned + Auto Scaling** | Predictable cost, burst capacity for spikes |
+| **Use Provisioned + Auto Scaling** | Suitable for predictable traffic when capacity control is useful; test scaling headroom |
 | **Consider On-Demand mode** | Better for unpredictable workloads; pay-per-request, no capacity planning |
 | **Enable DynamoDB Streams** | For event-driven downstream processing |
-| **Use PartiQL** | SQL-like queries without schema changes |
+| **Use PartiQL selectively** | SQL-compatible syntax over DynamoDB operations; it does not remove key-design or scan-cost constraints |
 | **Set TTL** | Automatic expiration for temporary data |
-| **Use TransactWriteItems** | Multi-item atomic writes (up to 100 actions, raised from 25 in Sep 2022; aggregate item size ≤ 4 MB) |
+| **Use TransactWriteItems** | Multi-item atomic writes with up to 100 actions and an aggregate item size of at most 4 MB |
 | **Batch Write** | BatchWriteItems for bulk operations (25 items/batch) |
-| **Use DAX** | For read-heavy workloads (10x read performance) |
+| **Use DAX selectively** | Microsecond cache hits for repeated eventually consistent reads; strongly consistent reads bypass the cache |
 
 ### DynamoDB Stream Trigger Configuration
 
@@ -91,10 +92,10 @@ Key event source mapping parameters for a DynamoDB Streams trigger.
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
-| `BatchSize` | 1-1000 | Records per invocation |
+| `BatchSize` | 1-10,000 | Records per invocation, also bounded by Lambda's invocation payload quota |
 | `MaximumBatchingWindowInSeconds` | 0-300s | Buffer for larger batches |
 | `StartingPosition` | `LATEST` / `TRIM_HORIZON` | Where to start reading |
-| `MaximumRetryAttempts` | 0-18,000 | Retries on processing failure (DynamoDB Streams: 0-18,000; SQS: 0-10,000) |
+| `MaximumRetryAttempts` | -1 or 0-10,000 | `-1` (default) retries until the stream record expires; bound retries and configure a failure destination for poison records |
 | `FunctionResponseTypes` | `ReportBatchItemFailures` | Partial batch failure reporting |
 
 ### DynamoDB Stream Handler Example
@@ -120,7 +121,7 @@ def lambda_handler(event, context):
     # For partial batch failure:
     # return {
     #     'batchItemFailures': [
-    #         {'itemIdentifier': 'failed-record-id'}
+    #         {'itemIdentifier': record['dynamodb']['SequenceNumber']}
     #     ]
     # }
 ```
@@ -129,18 +130,15 @@ def lambda_handler(event, context):
 
 ## Pattern 2: Lambda + RDS via RDS Proxy
 
-RDS Proxy is essential for Lambda-to-RDS connections to prevent connection exhaustion.
+RDS Proxy is a managed pooling option for bursty or high-concurrency Lambda-to-RDS access; it is not required for every workload.
 
 ```mermaid
 graph TB
     subgraph "VPC"
-        subgraph "Public Subnet"
-            A[API Gateway<br/>VPC Link]
-        end
-        
         subgraph "Private Subnet A"
             B[Lambda Function<br/>us-east-1a]
-            C[RDS Proxy Endpoint]
+            C[RDS Proxy<br/>Read/Write Endpoint]
+            CR[RDS Proxy<br/>Read-Only Endpoint]
         end
         
         subgraph "Private Subnet B"
@@ -154,25 +152,29 @@ graph TB
         end
     end
     
-    A --> B
+    A[API Gateway] --> B
     B -->|Connections| C
+    B -->|Read-only connections| CR
     D -->|Connections| C
+    D -->|Read-only connections| CR
     C -->|Pooled Connections| E
-    C -->|Read Queries| F
-    C -->|Read Queries| G
+    CR -->|Reader connections| F
+    CR -->|Reader connections| G
     
     subgraph "Connection Pool"
         H[Idle Connection Cache]
-        I[Max Connections: 100]
-        J[Connection Borrows: 1000+]
+        I[MaxConnectionsPercent]
+        J[BorrowTimeout + IdleClientTimeout]
     end
 ```
 
 ### Why This Pattern?
 
-Relational databases cap the number of simultaneous connections (RDS/Aurora `max_connections` is typically in the hundreds, sized to instance memory), but Lambda scales by running many concurrent, independent execution environments — each one opening its own connection if it talks to the database directly. A traffic spike that pushes Lambda to a few hundred concurrent invocations can open more connections than the database allows in seconds, causing "too many connections" errors for every client, not just the Lambda functions that caused the spike. RDS Proxy sits in front of the database and multiplexes many Lambda-side connections onto a much smaller, stable pool of physical database connections, decoupling Lambda's concurrency from the database's hard connection ceiling.
+Relational databases have a finite, engine- and instance-dependent connection budget, while Lambda can create many concurrent execution environments—each potentially opening a connection. A traffic spike can therefore exceed `max_connections` and affect every database client. RDS Proxy maintains a bounded backend pool and can multiplex client connections when session state does not pin them. It reduces connection churn and protects database headroom, but it does not remove the database's query, CPU, memory, or connection limits.
 
-**Trade-off:** the proxy is an additional managed component with its own cost (billed per vCPU-hour of the underlying instances it provisions) and adds a small amount of latency to every query since traffic now hops through the proxy instead of going straight to the database. It also doesn't eliminate the need for query-level tuning — a proxy with a saturated pool still queues or rejects borrow requests, it just moves the bottleneck from "database connection limit" to "proxy pool size," which still needs to be sized against realistic peak concurrency.
+**Trade-off:** the proxy is an additional managed component billed from the capacity of the associated database instances or clusters, and adds a network hop. It also doesn't eliminate query tuning or database capacity limits—a saturated proxy pool queues or times out connection borrows, so pool percentages and borrow timeouts must be sized against measured peak concurrency.
+
+The default RDS Proxy endpoint is read/write and connects to the writer. For Aurora, create a separate read-only proxy endpoint to route connections to available readers; the proxy does not inspect each SQL statement and automatically split reads from writes through one connection.
 
 ### RDS Proxy Configuration
 
@@ -180,30 +182,38 @@ Key RDS Proxy settings and the reasoning behind each.
 
 | Setting | Value | Rationale |
 |---------|-------|-----------|
-| `Idle Timeout` | 10-120s | Balance between reuse and freshness |
-| `Max Connections` | 50-200 | Don't exceed RDS `max_connections` |
-| `DB Idle Timeout` | 5-30s | Close idle DB connections |
-| `TLS` | Required | Encrypt proxy-to-database traffic |
-| `Auth Scheme` | Secrets Manager | Automatic password rotation |
+| `IdleClientTimeout` | Workload-specific (default 1,800s) | Close idle client connections without using invented low timeouts |
+| `MaxConnectionsPercent` | Percentage of database `max_connections` | Leave headroom for administration and non-proxy clients |
+| `MaxIdleConnectionsPercent` | Percentage of the proxy's connection ceiling | Balance warm capacity and database resource use |
+| `ConnectionBorrowTimeout` | Must fit inside the caller's timeout budget | Bound how long a request waits for a database connection |
+| `RequireTLS` | Enable | Encrypt client-to-proxy traffic |
+| Authentication | Secrets Manager and/or end-to-end IAM authentication where supported | Avoid hard-coded credentials and design rotation explicitly |
 
 ### Lambda + RDS Proxy Example
 
 ```python
-import pg8000
+import json
 import os
+import boto3
+import pg8000
 
 # Reuse connection across invocations (outside handler)
 db_pool = None
+secrets = boto3.client('secretsmanager')
 
 def get_connection():
     global db_pool
     if db_pool is None:
+        credentials = json.loads(secrets.get_secret_value(
+            SecretId=os.environ['DB_SECRET_ARN']
+        )['SecretString'])
         db_pool = pg8000.dbapi.connect(
             host=os.environ['RDS_PROXY_ENDPOINT'],
             port=5432,
             database=os.environ['DB_NAME'],
-            user=os.environ['DB_USER'],
-            password=os.environ['DB_PASSWORD']  # From Secrets Manager
+            user=credentials['username'],
+            password=credentials['password'],
+            ssl_context=True,
         )
     return db_pool
 
@@ -216,7 +226,7 @@ def lambda_handler(event, context):
 
 ### Lambda Connection Reuse
 
-In addition to RDS Proxy, reuse connections by keeping the DB client outside the handler function. The execution environment is often reused across invocations, making the connection effectively cached. However, RDS Proxy remains essential for high-concurrency scenarios.
+Whether connecting directly or through RDS Proxy, initialize clients outside the handler and validate/reconnect stale connections. Execution-environment reuse is opportunistic, so this reduces connection churn but is not a substitute for a concurrency and connection-budget calculation.
 
 ### Lambda VPC Configuration
 
@@ -227,7 +237,7 @@ Networking settings to configure when a Lambda function needs VPC access to RDS.
 | `VPC Subnets` | 2+ AZs | High availability |
 | `Security Groups` | Minimal egress | Least privilege |
 | `VPC Endpoints` | For S3, DynamoDB | Avoid NAT Gateway costs |
-| `Cold Start Mitigation` | Provisioned Concurrency | Keep VPC connections warm |
+| `Cold Start Mitigation` | Provisioned Concurrency only when latency measurements justify its cost | Keeps execution environments initialized; it does not guarantee a particular database connection stays alive |
 
 ---
 
@@ -256,9 +266,9 @@ graph LR
 
 ### Why This Pattern?
 
-Without a change feed, keeping downstream systems (search indexes, caches, archives) in sync with a DynamoDB table means every write path has to remember to also update every consumer, or the application has to poll the table for changes — both approaches drift out of sync as new consumers are added or a write path is missed. DynamoDB Streams captures every item-level mutation in commit order and delivers it exactly once per shard to a trigger, so cache invalidation, search indexing, and archival become independent, decoupled subscribers to a single source of truth instead of code paths the write handler has to know about and call directly.
+Without a change feed, keeping downstream systems (search indexes, caches, archives) in sync with a DynamoDB table means every write path has to remember to also update every consumer, or the application has to poll the table for changes. DynamoDB Streams captures item-level mutations in sequence within each item and lets a Lambda event source mapping process shard batches. Event source mappings are at-least-once, so duplicate processing can occur; cache invalidation, search indexing, and archival handlers must be idempotent.
 
-**Trade-off:** stream records expire after 24 hours, so a downstream consumer that's down or backlogged past that window permanently loses those change events with no replay mechanism beyond re-reading the table state; the fan-out via SNS/SQS also adds delivery latency (typically sub-second, but not instantaneous) between the write and the consumer seeing it, so this pattern is unsuitable for anything that needs the update to be immediately visible to a downstream read.
+**Trade-off:** stream records expire after 24 hours, so a consumer that cannot catch up within the retention window needs another recovery source, such as an event store, outbox/archive, export, or table rebuild. The stream and any SNS/SQS fan-out are asynchronous and provide no fixed end-to-end latency guarantee, so this pattern is unsuitable when a downstream read must be immediately consistent with the write.
 
 ### Stream View Types
 
@@ -273,11 +283,11 @@ What each DynamoDB Streams view type includes, and when to pick it.
 
 ### EventBridge Pipes Alternative
 
-EventBridge Pipes can route DynamoDB Streams directly to SQS, SNS, Lambda, or HTTP endpoints without a Lambda function. Useful for simple routing without compute overhead.
+EventBridge Pipes can route DynamoDB Streams directly to supported targets such as SQS, SNS, Lambda, or an EventBridge API Destination without a routing Lambda. Use an API Destination for an HTTP endpoint.
 
 ### When to Use DynamoDB Streams
 
-- Use when you need to react to data changes in real-time
+- Use when you need asynchronous, near-real-time reactions to data changes
 - Use for audit trails, cache invalidation, search indexing
 - Don't use for high-throughput ordered streaming — consider Kinesis Data Streams
 
@@ -348,18 +358,17 @@ graph TB
     subgraph "Primary Region: us-east-1"
         A1[API Gateway] --> B1[Lambda]
         B1 --> C1[(Aurora Primary)]
-        C1 -->|Async Replication| D1[(Aurora Replica)]
         B1 -->|Writes| E1[(DynamoDB Global Table)]
     end
     
     subgraph "Secondary Region: eu-west-1"
         A2[API Gateway] --> B2[Lambda]
-        B2 -->|Reads Only| D2[(Aurora Read Replica)]
+        B2 -->|Reads; optional write forwarding| D2[(Aurora Global<br/>Secondary Cluster)]
         B2 -->|Reads/Writes| E2[(DynamoDB Global Table)]
     end
     
     subgraph "Global Services"
-        E1 <-->|Cross-Region Sync| E2
+        E1 <-->|MREC async or MRSC synchronous replication| E2
         F[Route 53<br/>Failover Routing]
         G[CloudFront<br/>Edge Cache]
     end
@@ -368,13 +377,14 @@ graph TB
     F --> A2
     G --> A1
     G --> A2
+    C1 -->|Aurora Global storage replication| D2
 ```
 
 ### Why This Pattern?
 
 A single-region database ties every user's latency to the distance from that region, and a regional outage takes the entire application down with no failover path — for a global user base or an availability SLA that requires surviving a region-level event, that's a single point of failure the business can't accept. Distributing data across regions (via DynamoDB Global Tables' multi-master replication or Aurora Global Database's fast cross-region replicas) lets reads happen close to the user and gives the application a standby region to fail over to, turning a regional AWS event into a bounded RPO/RTO incident instead of a full outage.
 
-**Trade-off:** multi-region replication is asynchronous, so writes made in one region are not immediately visible in another, and concurrent writes to the same item in different regions (with Global Tables) are resolved by last-writer-wins, which can silently discard one of two conflicting updates. Aurora Global Database restricts writes to a single primary region, so failover to a secondary region requires a promotion step and a brief write-unavailability window — this pattern buys resilience and read locality at the cost of strict consistency and added replication cost, and isn't worth the complexity for an application that only serves one region.
+**Trade-off:** Aurora Global Database has one writer Region; write forwarding from a secondary still executes the write in the primary, and failover changes the primary. DynamoDB global tables offer multi-Region eventual consistency (MREC, the default) and multi-Region strong consistency (MRSC). MREC can expose stale cross-Region reads and resolves concurrent same-item writes with last-writer-wins; MRSC has stricter topology, Region, latency, and feature constraints. Select the model from measured RPO/RTO and consistency requirements rather than assuming all multi-Region replication is asynchronous.
 
 ### Multi-Region Database Options
 
@@ -382,10 +392,11 @@ Replication model and typical RPO/RTO/latency for each multi-region database opt
 
 | Service | Replication | RPO | RTO | Read Latency | Write Latency |
 |---------|------------|-----|-----|-------------|---------------|
-| **DynamoDB Global Tables** | Multi-master, active-active | ~0s | ~0s | Local | Local |
-| **Aurora Global DB** | Single-master, active-passive | <1s | <1min | Local (read) | Cross-region (write) |
-| **Aurora Cross-Region Read Replica** | Async replication | Variable | Manual failover | Local | N/A (read-only) |
-| **DocumentDB Global Cluster** | Multi-region, active-passive | <1s | <3min | Local (read) | Primary region (write) |
+| **DynamoDB Global Tables (MREC)** | Multi-writer, asynchronous | Workload-dependent; monitor replication latency | Application traffic shift | Local | Local |
+| **DynamoDB Global Tables (MRSC)** | Multi-writer, strongly consistent | Zero RPO by design | Application traffic shift; topology constraints apply | Quorum-dependent | Quorum-dependent |
+| **Aurora Global Database** | One writer Region, read-only secondaries; optional write forwarding to primary | Usually low but not a hard guarantee; monitor lag | Managed switchover/failover time must be tested | Local secondary reads | Executed in primary Region |
+| **Aurora Cross-Region Read Replica** | Asynchronous | Replication-lag dependent | Manual promotion and traffic shift | Local | N/A until promotion |
+| **DocumentDB Global Cluster** | One primary Region, read-only secondary clusters | Replication-lag dependent | Managed/manual promotion must be tested | Local secondary reads | Primary Region |
 
 ### Backup & Recovery
 
@@ -394,9 +405,9 @@ Backup method, point-in-time recovery, and cross-region support by database serv
 | Service | Backup Method | PITR | Cross-Region |
 |---------|-------------|------|--------------|
 | **DynamoDB** | On-demand + continuous backups | Yes (up to 35 days) | Yes (cross-region backup) |
-| **Aurora** | Automated snapshots + binlog | Yes (up to 35 days) | Yes (copy snapshots) |
+| **Aurora** | Continuous automated backups plus manual cluster snapshots | Yes (1-35 day retention) | Yes (copy snapshots; continuous cross-Region backup support and constraints vary by configuration) |
 | **RDS** | Automated + on-demand snapshots | Yes (up to 35 days) | Yes (copy snapshots) |
-| **DocumentDB** | Continuous backups | Yes (up to 35 days) | No (manual export) |
+| **DocumentDB** | Automated/on-demand snapshots and AWS Backup | Yes (up to 35 days) | Validate snapshot-copy/AWS Backup support for the selected Regions and key configuration |
 
 ### When to Use Multi-Region
 
@@ -432,7 +443,7 @@ graph TB
 
 ### Why This Pattern?
 
-Lambda's execution model — many short-lived, independently scaled execution environments — is fundamentally at odds with how relational databases manage connections: each environment that opens its own connection holds it for the lifetime of that environment, and a scale-out event can create far more simultaneous connections than the database's `max_connections` setting allows, producing outright connection errors rather than degraded performance. This is not a tuning problem that goes away with a bigger instance class; it's a structural mismatch between Lambda's concurrency model and a database's fixed connection budget, and it shows up precisely when the application is under the load it most needs to handle. Pooling connections behind RDS Proxy (or, for less extreme concurrency, disciplined connection reuse across warm invocations) is what keeps the number of physical database connections bounded regardless of how many Lambda instances are running.
+Lambda can create many short-lived execution environments while a relational database has a finite connection budget. Scale-out can therefore open more simultaneous sessions than `max_connections` permits. A larger database class can increase available resources, but it does not eliminate the need to budget concurrency, reuse valid connections, and bound the backend pool. RDS Proxy can multiplex unpinned client sessions and cap its database connection use; pinned sessions and a saturated database still constrain throughput.
 
 **Trade-off:** connection reuse across invocations is opportunistic, not guaranteed — a connection held in global scope only survives if the execution environment is reused, so under highly variable or spiky traffic a meaningful fraction of invocations still pay the connection-establishment cost, and stale connections held across long idle periods can fail silently on the next query. RDS Proxy closes that gap but becomes another component whose pool size, idle timeout, and failover behavior have to be tuned against the actual concurrency profile — it shifts the problem rather than making connection management a non-issue.
 
@@ -442,28 +453,28 @@ How connection handling differs between Lambda connecting directly to RDS versus
 
 | Aspect | Without Proxy | With RDS Proxy |
 |--------|--------------|----------------|
-| Connections per Lambda | 1 (new each invocation) | Shared from pool |
-| Cold start impact | Full connection overhead | Minimal (proxy is always on) |
-| Max Lambda concurrency | Limited by RDS max_connections | Limited by proxy pool size |
-| Connection reuse | No (Lambda ephemeral) | Yes (idle connection cache) |
-| Failover support | Manual | Automatic (Aurora Cluster) |
+| Connections per Lambda | Can be reused in a warm environment, but scale-out opens more | Client connections are multiplexed onto a managed database pool when sessions are not pinned |
+| Cold start impact | New environments may pay connection setup | New client connection still exists; backend database connection reuse can reduce setup |
+| Max useful Lambda concurrency | Bounded by connection and database workload capacity | Bounded by proxy/backend pool and database workload capacity; excess borrows can wait or time out |
+| Connection reuse | Opportunistic within warm environments | Managed database connection reuse plus optional client reuse |
+| Failover support | Driver/application reconnect behavior | RDS Proxy can preserve connections and reduce failover disruption; test engine-specific behavior |
 
-### Lambda SnapStart (Java)
+### Lambda SnapStart
 
-For Java-based Lambda functions connecting to databases, enable SnapStart to reduce cold start times from seconds to milliseconds. SnapStart takes a snapshot of the Lambda execution environment after initialization, replaying it on cold starts.
+For supported Java, Python, and .NET managed Lambda runtimes, SnapStart can reduce initialization latency by restoring a cached snapshot. It is available only for published versions and has feature/runtime constraints. Do not assume a snapshotted database connection remains usable: validate or re-establish network connections after restore, using runtime-specific restore hooks where appropriate. Measure the result; SnapStart does not guarantee a particular millisecond latency.
 
 ### When to Use RDS Proxy
 
-- Use when Lambda concurrency > 50 (connection exhaustion risk)
+- Use when measured Lambda concurrency and database connection demand can exceed the safe database connection budget
 - Use for Aurora failover support
 - Use when connection establishment time impacts latency
-- Don't use for low-concurrency workloads (<10 concurrent Lambdas) — direct connection is simpler
+- Don't use when direct, reused connections or the RDS Data API meet the concurrency and latency requirements more simply
 
 ---
 
 ## Pattern 7: SQS + Database Transactional Outbox
 
-Ensuring reliable message delivery with database transactions.
+Ensuring reliable at-least-once publication from a database transaction.
 
 ```mermaid
 graph TB
@@ -475,7 +486,7 @@ graph TB
         D -->|Stream| E[DynamoDB Stream]
         E -->|Trigger| F[Lambda<br/>Outbox Processor]
         F -->|Publish| G[SQS Queue<br/>order-events]
-        F -->|Delete from Outbox| D
+        F -->|Mark PUBLISHED; expire later with TTL| D
     end
     
     G -->|Poll| H[Lambda<br/>Event Consumer]
@@ -494,6 +505,7 @@ DynamoDB schema for the outbox table that buffers events until they're safely pu
 | `created_at` | Number | Timestamp for ordering |
 | `status` | String | PENDING / PUBLISHED |
 | `retry_count` | Number | Retry tracking |
+| `expires_at` | Number | Optional DynamoDB TTL timestamp for delayed cleanup after publication |
 
 ### Why This Pattern?
 
@@ -501,13 +513,16 @@ Failure scenarios the transactional outbox pattern is designed to eliminate.
 
 | Problem | Solution |
 |---------|----------|
-| Database write succeeds, message publish fails | Outbox record persists, processor retries |
+| Database write succeeds, message publish fails | The atomically written outbox record persists and the stream processor retries |
 | Message publish succeeds, database write fails | Transaction rolls back, no orphaned message |
 | Consumer processes before database commit | Outbox only published after transaction completes |
 
 ### Outbox Processor Example
 
+The order mutation and outbox insert must be one `TransactWriteItems` operation. The publisher below can send the same message more than once if it crashes after SQS accepts the message but before the stream checkpoint advances. Give the event a stable ID in its envelope and make consumers idempotent; the outbox pattern does not create exactly-once delivery. Configure the event source mapping with `ReportBatchItemFailures` and an on-failure destination.
+
 ```python
+import os
 import boto3
 
 sqs = boto3.client('sqs')
@@ -515,35 +530,54 @@ dynamodb = boto3.resource('dynamodb')
 outbox_table = dynamodb.Table('outbox')
 
 def lambda_handler(event, context):
-    published_ids = []
-    
+    failures = []
+
     for record in event['Records']:
-        outbox_id = record['dynamodb']['NewImage']['id']['S']
-        event_data = record['dynamodb']['NewImage']['event_data']['S']
-        
+        image = record.get('dynamodb', {}).get('NewImage')
+        if record['eventName'] not in ('INSERT', 'MODIFY') or not image:
+            continue
+        if image.get('status', {}).get('S') != 'PENDING':
+            continue
+
+        outbox_id = image['id']['S']
+        event_data = image['event_data']['S']
+
         try:
             sqs.send_message(
                 QueueUrl=os.environ['QUEUE_URL'],
                 MessageBody=event_data
             )
-            published_ids.append(outbox_id)
-        except Exception as e:
-            print(f"Failed to publish {outbox_id}: {e}")
+        except Exception as exc:
+            print(f"Failed to publish {outbox_id}: {exc}")
+            failures.append({
+                'itemIdentifier': record['dynamodb']['SequenceNumber']
+            })
             continue
-    
-    # Mark as published AFTER confirming SQS receipt
-    for outbox_id in published_ids:
-        outbox_table.update_item(
-            Key={'id': outbox_id},
-            UpdateExpression='SET #status = :published',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={':published': 'PUBLISHED'}
-        )
+
+        # Status is useful for operations/TTL cleanup, but the stream checkpoint—not
+        # this status update—is what drives source-record retries.
+        try:
+            outbox_table.update_item(
+                Key={'id': outbox_id},
+                UpdateExpression='SET #status = :published',
+                ConditionExpression='#status = :pending',
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={
+                    ':pending': 'PENDING',
+                    ':published': 'PUBLISHED'
+                }
+            )
+        except Exception as exc:
+            # The SQS publish already succeeded. Retrying this source record solely
+            # for a status-write failure would create another delivery.
+            print(f"Published {outbox_id}; status update needs reconciliation: {exc}")
+
+    return {'batchItemFailures': failures}
 ```
 
 ### When to Use Outbox Pattern
 
-- Use when you need exactly-once message delivery with database transactions
+- Use when you need atomic business-data/outbox persistence and reliable at-least-once publication
 - Use for event sourcing with reliable downstream notification
 - Don't use for simple fire-and-forget — direct SQS send is simpler
 
@@ -555,10 +589,23 @@ Common database integration mistakes and the fix for each.
 
 | Anti-Pattern | Problem | Solution |
 |-------------|---------|----------|
-| **Direct Lambda → RDS without proxy** | Connection exhaustion at scale | Always use RDS Proxy |
-| **Long Lambda DB connections** | Connection leak on timeout | Set connection timeout < Lambda timeout |
+| **Unbounded Lambda → RDS connections** | Connection exhaustion at scale | Budget concurrency and use connection reuse, RDS Proxy, or the Data API as appropriate |
+| **Unbounded or stale Lambda DB sessions** | Connection exhaustion or failed reuse after idle periods | Set connect/query/socket timeouts inside the Lambda budget; rollback/close failed sessions and validate reused connections |
 | **Synchronous cross-region DB calls** | High latency, timeout failures | Use async replication |
-| **No database retry logic** | Transient failures cause data loss | Implement exponential backoff |
-| **Storing secrets in Lambda env vars** | Security risk, rotation difficulty | Use Secrets Manager |
+| **Undifferentiated database retries** | Transient failures surface unnecessarily, while retrying non-idempotent work can duplicate side effects | Retry only retryable failures with bounded backoff/jitter and idempotency or transaction semantics |
+| **Database passwords in Lambda environment variables** | Anyone able to read function configuration may expose them, and rotation is awkward | Prefer IAM database authentication where suitable or Secrets Manager with tested rotation/caching |
 | **Scanning DynamoDB in Lambda** | High cost, slow performance | Use Query with proper indexes |
 | **Large DynamoDB items** | 400 KB limit, expensive reads | Store large data in S3, reference in DynamoDB |
+
+---
+
+## Authoritative AWS references
+
+- [Using Lambda with DynamoDB Streams](https://docs.aws.amazon.com/lambda/latest/dg/with-ddb.html)
+- [DynamoDB Streams partial batch responses](https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-batchfailurereporting.html)
+- [DynamoDB transactional APIs](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html)
+- [RDS Proxy endpoints and Aurora reader endpoints](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/rds-proxy-endpoints.html)
+- [RDS Proxy connection behavior and pinning](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html)
+- [Aurora Global Database write forwarding](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-write-forwarding.html)
+- [Lambda SnapStart supported runtimes and limitations](https://docs.aws.amazon.com/lambda/latest/dg/snapstart.html)
+- [DynamoDB global tables core concepts](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/globaltables-CoreConcepts.html)

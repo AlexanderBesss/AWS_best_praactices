@@ -4,15 +4,16 @@
 
 ### Policy Comparison
 
-| Policy | Description | Failover | Latency-Based | Weight | Use Case |
-|--------|-------------|----------|---------------|--------|----------|
-| **Simple** | Single record, random from multiple | No | No | No | Single resource, non-critical |
-| **Failover** | Primary + secondary | Yes | No | No | Active-passive HA |
-| **Latency** | Route to lowest latency region | No | Yes | No | Global low-latency |
-| **Multi-Value** | Return multiple values, health-checked | Partial | No | No | Simple HA (up to 8 values) |
-| **Weighted** | Distribute traffic by weight | No | No | Yes | A/B testing, migration |
-| **Geolocation** | Route by user location | No | No | No | Geo-restrict, localize |
-| **Geoproximity** | Route by location + bias | No | No | No | Custom geo-distribution |
+| Policy | Core behavior | Health-check aware | Use Case |
+|--------|---------------|--------------------|----------|
+| **Simple** | Return one or more values without policy-specific selection | No | Single resource or basic multi-answer DNS |
+| **Failover** | Return primary unless unhealthy, then secondary | Yes | Active-passive HA |
+| **Latency** | Select the record for the AWS Region with lowest measured network latency | Yes | Global low-latency |
+| **Multi-value answer** | Return up to eight healthy values selected from a larger set | Yes | DNS-level availability across multiple endpoints; not a load-balancer replacement |
+| **Weighted** | Select records in proportion to configured weights | Yes | A/B testing, migration |
+| **Geolocation** | Select by the request's geographic origin, with a default fallback record | Yes | Localization and geographic routing |
+| **Geoproximity** | Select by resource/user location and optional bias | Yes | Shift geographic boundaries between resources |
+| **IP-based** | Select by configured CIDR collection | Yes | Route known client networks differently |
 
 ### Policy Selection Matrix
 
@@ -45,7 +46,7 @@
 | **Interval** | 30 seconds (default) or 10 seconds | Faster detection vs cost |
 | **Failed thresholds** | 3 (default) | Balance false positives/negatives |
 | **Regions** | At least 3 | Global health assessment |
-| **Protocol** | HTTPS preferred | Security, full stack check |
+| **Protocol** | Match the endpoint and failure mode being tested; use HTTPS when the TLS path must be exercised | Test the actual serving path (Route 53 health checks do not validate the endpoint certificate) |
 | **Port** | Application port | Check actual service |
 | **Resource path** | Health endpoint | Lightweight check |
 | **Search string** | Expected response | Validate response content |
@@ -58,30 +59,15 @@
 | **Multiple regions** | At least 3 for accuracy |
 | **Alarm integration** | CloudWatch alarms for notification |
 | **Failover testing** | Regular failover drills |
-| **Cost awareness** | ~$0.50/check/month (AWS endpoints); higher for non-AWS endpoints and optional features (fast interval, latency, string matching) |
+| **Cost awareness** | Health-check pricing varies by endpoint type and optional features; verify current pricing before multiplying checks across records/Regions |
 
 ```mermaid
 flowchart LR
-    subgraph Primary
-        P1[Primary Endpoint]
-        HC1[(Health Check)]
-    end
-    subgraph Secondary
-        S1[Secondary Endpoint]
-        HC2[(Health Check)]
-    end
-    R53[Route 53 Failover Record] --> P1
-    R53 --> S1
-    HC1 -.Healthy.-> R53
-    HC2 -.Healthy.-> R53
-    HC1 -.Unhealthy.-> R53
-    R53 -->|Primary Healthy| P1
-    R53 -->|Primary Unhealthy| S1
-
-    style P1 fill:#4ade80,color:#000
-    style S1 fill:#fbbf24,color:#000
-    style HC1 fill:#93c5fd,color:#000
-    style HC2 fill:#93c5fd,color:#000
+    HC1[(Primary health check)] -.->|status| R53{Route 53 failover decision}
+    HC2[(Secondary health check)] -.->|status| R53
+    Q[DNS query] --> R53
+    R53 -->|Primary healthy| P1[Primary endpoint]
+    R53 -->|Primary unhealthy and secondary healthy| S1[Secondary endpoint]
 ```
 
 ---
@@ -95,25 +81,31 @@ flowchart LR
 | **A** | IPv4 address | Standard web hosting |
 | **AAAA** | IPv6 address | IPv6 support |
 | **CNAME** | Alias to another name | Subdomain routing |
-| **Alias** | AWS resource alias | Cost-free, works at zone apex |
+| **DS** | Delegation signer | DNSSEC chain of trust |
+| **HTTPS** | HTTPS service binding information | HTTP endpoint connection hints |
 | **MX** | Mail server | Email routing |
 | **NAPTR** | Naming authority pointer | SIP, telephony |
 | **NS** | Name server | Delegation |
 | **PTR** | Reverse DNS | Reverse lookups |
 | **SOA** | Start of authority | Zone info |
-| **SPF** | Sender Policy Framework | Email authentication |
+| **SPF** | Legacy SPF record type | Do not create for SPFv1; publish SPF policy in TXT instead |
 | **SRV** | Service locator | Service discovery |
+| **SSHFP** | SSH public-key fingerprint | SSH host-key verification with DNSSEC |
+| **SVCB** | General service binding | Connection parameters and aliases |
+| **TLSA** | TLS certificate/key association | DANE with DNSSEC |
 | **TXT** | Text record | Domain verification, DKIM |
 | **CAA** | Certificate Authority Authorization | Certificate issuance control |
 
 ### Alias vs CNAME
 
+An alias is a Route 53 record feature on supported record types (usually A/AAAA), not a DNS record type of its own.
+
 | Feature | Alias | CNAME |
 |---------|-------|-------|
 | **Zone apex** | Supported | Not supported |
 | **Additional queries** | No (resolved by Route 53) | Yes (additional DNS query) |
-| **Cost** | Free (no additional queries) | Charged per query |
-| **Health checks** | Supported | Not directly |
+| **Cost** | Route 53 does not charge for alias queries to eligible AWS resources; target-service charges can still apply | Standard Route 53 query charges apply |
+| **Health checks** | Can evaluate target health for supported alias targets, or use an explicit health check where supported | Use routing-policy records and health checks rather than relying on the CNAME itself |
 | **AWS resources** | ELB, CloudFront, S3, etc. | Any hostname |
 | **Recommendation** | **Prefer Alias for AWS resources** | Use for non-AWS targets |
 
@@ -127,7 +119,7 @@ flowchart LR
 |---------|-------------|
 | **Private zone** | Resolves only in associated VPCs |
 | **VPC association** | Associate with multiple VPCs |
-| **Region-specific** | Per-region private zones |
+| **Region scope** | A private hosted zone is not Region-bound and can be associated with VPCs in multiple Regions |
 | **Resolver endpoints** | Share with on-premises |
 | **Inbound endpoint** | On-premises to VPC resolution |
 | **Outbound endpoint** | VPC to on-premises resolution |
@@ -149,11 +141,12 @@ flowchart LR
 
 | Setting | Recommendation |
 |---------|---------------|
-| **Enable DNSSEC** | For all public zones |
-| **Key signing key (KSK)** | AWS-managed or customer-managed |
-| **Zone signing key (ZSK)** | AWS-managed or customer-managed |
-| **Key rollover** | Automatic or manual |
+| **Enable DNSSEC** | For public zones when the registrar/parent-zone chain of trust and operations are ready; test rollover and failure recovery |
+| **Key signing key (KSK)** | Backed by a customer-managed asymmetric KMS key in `us-east-1`; you manage KSK lifecycle |
+| **Zone signing key (ZSK)** | Managed by Route 53 |
+| **Key rollover** | Plan KSK rollover; Route 53 manages ZSK rotation |
 | **Trust anchor** | DS record at registrar |
+| **VPC resolver validation** | Enable Route 53 Resolver DNSSEC validation separately for VPCs that require validation; authoritative signing and recursive validation are different controls |
 
 ### Benefits
 
@@ -166,21 +159,21 @@ flowchart LR
 
 ---
 
-## Application Recovery Controller (ARC)
+## Amazon Application Recovery Controller (ARC)
 
-Route 53 ARC is a separate set of capabilities (beyond DNS health checks/failover) for building and testing recovery across AZs, Regions, and on-premises:
+ARC is a separate AWS service for recovering applications across Availability Zones and Regions. Routing controls integrate with a special Route 53 health check, but ARC also includes non-DNS recovery capabilities:
 
 | Component | Description | Use Case |
 |-----------|-------------|----------|
-| **Readiness checks** | Continuously audit resource configuration/capacity/quota parity across replicas | Catch drift before a failover is needed |
+| **Region switch** | Orchestrate and monitor multi-Region recovery plans with plan evaluation and execution safety controls | Managed regional failover workflow |
 | **Routing controls** | Highly available on/off switches (backed by a 5-endpoint redundant cluster) that gate traffic shifting | Deterministic, low-latency failover trigger |
-| **Recovery groups / cells** | Model application recovery scope and dependencies | Structure multi-region DR |
+| **Readiness checks (existing customers)** | Audit resource configuration/capacity/quota parity across replicas; this feature is no longer open to new customers | Existing recovery-group/cell designs |
 | **Zonal shift / zonal autoshift** | Shift traffic away from an impaired AZ (via ELB/ASG) in minutes, with optional automatic shift | Fast AZ-level mitigation without a full DR failover |
 
 | Practice | Description |
 |----------|-------------|
-| **Use routing controls, not DNS TTLs, for time-critical failover** | Routing control state changes propagate faster and more reliably than relying on DNS caching behavior |
-| **Run readiness checks continuously** | Confirms standby region/AZ can actually absorb failover traffic |
+| **Use routing controls for operator-controlled regional failover** | Routing controls provide a highly available control plane and safety rules, but DNS caching and record TTLs still affect when clients observe DNS changes |
+| **Evaluate recovery plans continuously** | For new designs, use Region switch plan evaluation; existing readiness-check customers can continue using readiness checks |
 | **Test zonal shift regularly** | Validates AZ-level mitigation without waiting for a real incident |
 
 ---
@@ -211,15 +204,15 @@ Route 53 ARC is a separate set of capabilities (beyond DNS health checks/failove
 
 ## Monitoring
 
-### Key Metrics
+### Key Signals
 
-| Metric | Description | Alert Threshold |
-|--------|-------------|----------------|
-| DNSQueryCount | Total DNS queries | Baseline tracking |
-| HealthCheckStatus | Health check state | State change |
-| DNSQueryEnqueued | Queries processed | Baseline tracking |
-| DNSQueryDropped | Queries dropped | > 0 |
-| DNSQueryAnswered | Queries answered | Match enqueued |
+| Signal | Source | Alert/Analysis |
+|--------|--------|----------------|
+| HealthCheckStatus | Route 53 health-check CloudWatch metrics | Alarm on an unexpected unhealthy state |
+| HealthCheckPercentageHealthy / ChildHealthCheckHealthyCount | Route 53 calculated/endpoint health checks | Alarm on loss of checker or child-check quorum appropriate to the design |
+| ConnectionTime / SSLHandshakeTime / TimeToFirstByte | Endpoint health-check metrics where applicable | Compare with endpoint SLO/baseline |
+| Public DNS queries | Route 53 public query logging to CloudWatch Logs | Investigate names, types, response codes, and source networks |
+| Resolver queries | Route 53 Resolver query logging | Security and hybrid-DNS troubleshooting |
 
 ### Best Practices
 
@@ -236,20 +229,15 @@ Route 53 ARC is a separate set of capabilities (beyond DNS health checks/failove
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
-| **Alias records** | Free for AWS resources | No additional query costs |
-| **Health check optimization** | Right-size check count | $0.50/check/month |
+| **Alias records** | Use aliases for eligible AWS resources | Route 53 does not charge for eligible alias queries |
+| **Health check optimization** | Right-size check count and optional features | Lower recurring check cost |
 | **TTL optimization** | Higher TTL = fewer queries | Reduced query volume |
 | **Zone consolidation** | Fewer zones | Per-zone costs |
 | **Remove unused records** | Clean up old records | Query cost reduction |
 
 ### Pricing
 
-| Component | Price |
-|-----------|-------|
-| **Hosted zone** | $0.50/month |
-| **Health check** | $0.50/month (AWS endpoints) or $0.75/month (non-AWS endpoints); optional features (fast interval, string matching, latency measurement) add extra per-feature cost |
-| **DNS queries** | $0.40 per M queries (first 1B) |
-| **Resource record sets** | $0.50/month per 1,000 (above included 1,000) |
+Route 53 pricing varies by hosted-zone count, query volume and routing policy, health-check type/options, Resolver endpoints and query logs, ARC features, and domain registration. Use the current pricing page rather than embedding rates that can change or vary by tier.
 
 ---
 
@@ -265,4 +253,25 @@ Route 53 ARC is a separate set of capabilities (beyond DNS health checks/failove
 | Shield | DDoS protection | DNS DDoS mitigation |
 | ACM | SSL certificate validation | Domain ownership |
 | Transfer Family | SFTP endpoint routing | File transfer |
-| Application Recovery Controller | Readiness checks, routing controls, zonal shift | Multi-AZ/Region failover orchestration |
+| Amazon Application Recovery Controller | Region switch, routing controls, readiness checks for existing customers, and zonal shift | Multi-AZ/Region failover orchestration |
+
+---
+
+## Additional Best Practices
+
+- Use alias A and AAAA records for supported dual-stack AWS targets and keep IPv4/IPv6 health and routing behavior consistent.
+- For failover records, understand the "all records unhealthy" behavior and avoid attaching a health check to an alias when `EvaluateTargetHealth` already represents the same target state.
+- Keep TTLs low enough for the recovery objective before a planned migration, then raise them when stability and cache efficiency matter. Existing cached answers remain until their TTL expires.
+- Protect hosted-zone and registrar changes with least privilege, MFA for human access, CloudTrail alerts, and registry/registrar lock where available.
+- Enable DNSSEC alarms for `DNSSECInternalFailure` and `DNSSECKeySigningKeysNeedingAction`; do not enable signing without completing the parent-zone DS chain.
+- Use Resolver endpoints and rules for hybrid DNS; do not forward private DNS through an internet NAT path.
+
+## AWS References
+
+- [Route 53 routing policies](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html)
+- [Supported Route 53 record types](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html)
+- [Choosing between alias and non-alias records](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-choosing-alias-non-alias.html)
+- [Working with private hosted zones](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/hosted-zones-private.html)
+- [Configuring DNSSEC signing](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-configuring-dnssec.html)
+- [What is Amazon Application Recovery Controller?](https://docs.aws.amazon.com/r53recovery/latest/dg/what-is-route53-recovery.html)
+- [ARC readiness-check availability change](https://docs.aws.amazon.com/r53recovery/latest/dg/arc-readiness-availability-change.html)

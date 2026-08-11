@@ -1,235 +1,148 @@
-# KMS Best Practices
+# AWS KMS Best Practices
 
-## Key Management
+AWS Key Management Service (AWS KMS) protects key material and performs cryptographic operations. A KMS key is not a general-purpose secret store: keep passwords, tokens, and similar values in AWS Secrets Manager or Systems Manager Parameter Store and use KMS to protect them.
 
-### Key Types
+## Choose the Right Key Type
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| **Symmetric** | Encrypt and decrypt | General encryption |
-| **Asymmetric** | Sign/verify, encrypt/decrypt | Code signing, document signing |
-| **HMAC** | MAC generation/verification | Data integrity |
+| Key type | Supported operations | Typical use |
+|---|---|---|
+| **Symmetric encryption** | Encrypt, decrypt, re-encrypt, and generate data keys | Default choice for envelope encryption and most AWS service integrations |
+| **Asymmetric** | Encrypt/decrypt, sign/verify, or key agreement, depending on `KeyUsage` and `KeySpec` | Workloads that require a public key or signatures outside AWS KMS |
+| **HMAC** | Generate and verify MACs | Message authenticity and integrity |
+
+- Prefer AWS owned or AWS managed keys when you do not need to control policy, lifecycle, rotation, or cross-account access.
+- Use a customer managed key when you need those controls, a distinct audit boundary, imported key material, a custom key store, or a multi-Region key.
+- Treat multi-Region keys as interoperable copies of the same key material, not as backups. Each replica has its own key policy, grants, aliases, tags, and regional availability.
+- Use aliases in application configuration so that manual key replacement does not require distributing a new key ARN. Use a key ARN when a policy or API specifically requires an unambiguous key identity.
 
 ### Key States
 
-| State | Description | Action Required |
-|-------|-------------|-----------------|
-| **Enabled** | Key is operational | Normal operation |
-| **Disabled** | Key is not operational | Re-enable when needed |
-| **Pending Deletion** | Scheduled for deletion (7-30 days) | Cancel or wait |
-| **Compromised** | Key is compromised | Rotate immediately |
+`Compromised` is not an AWS KMS key state. Investigate suspected compromise, stop new use, and replace the key according to the incident plan.
 
-### Key Metadata
+| State | Meaning | Operational response |
+|---|---|---|
+| `Enabled` | Cryptographic operations are available | Normal operation |
+| `Disabled` | Cryptographic operations fail | Re-enable only after confirming that use is intended |
+| `PendingDeletion` | Key is in the configurable 7–30 day waiting period | Alarm on attempted use; cancel deletion if dependencies remain |
+| `PendingImport` | Imported key material is absent or expired | Import valid key material before use |
+| `Unavailable` | A custom key store is disconnected | Restore the custom key store and its dependencies |
+| `Creating`, `Updating`, `PendingReplicaDeletion` | Transitional states for supported key types | Wait for the transition and monitor for failure |
 
-| Attribute | Description | Best Practice |
-|-----------|-------------|---------------|
-| **Description** | Key purpose | Clear, descriptive |
-| **Key Spec** | Key specification | SYMMETRIC_DEFAULT or specific |
-| **Key Usage** | Encrypt/decrypt or sign/verify | Match use case |
-| **Origin** | AWS KMS or external | AWS KMS for managed |
-| **Key ID / ARN** | Unique identifier (CMK is legacy term) | Track in inventory |
+## Authorization and Key Policies
 
----
+Every KMS key has exactly one key policy. In the key-owning account, an IAM policy can grant access only when the key policy delegates permission management to the account; a key policy can also grant a principal directly. Explicit denies still win. For cross-account use, the key policy in the key-owning account **and** an IAM policy in the caller's account are required.
 
-## Key Policies
-
-### Key Policy Structure
-
-| Principal | Action | Effect | Use Case |
-|-----------|--------|--------|----------|
-| **AWS (account root)** | kms:* | Allow | Account administration |
-| **IAM users/roles** | Specific actions | Allow | Application access |
-| **AWS services** | Service-integrated actions | Allow | Service integration |
-| **Other accounts** | Cross-account access | Allow/Deny | Cross-account encryption |
-
-### Key Policy Best Practices
-
-| Practice | Description |
-|----------|-------------|
-| **Administrative principal** | Designate specific IAM role, not root |
-| **Least privilege** | Grant only required actions |
-| **Multi-Region keys** | Enable for DR scenarios (no backup key feature) |
-| **Rotation** | Enable automatic rotation (default annual; customizable 90 days-7 years) |
-| **Policy validation** | Test before deployment |
-
-```mermaid
-flowchart TD
-    KP["KMS Key Policy\n(top-level, required)"]
-    KP -->|"grants"| A["Account Root\nkms:* (admin)"]
-    KP -->|"grants"| B["IAM Roles\nspecific actions"]
-    KP -->|"grants"| C["AWS Services\nservice-integrated"]
-    KP -->|"grants"| D["External Accounts\ncross-account"]
-    IAM["IAM Policy\n(additional restriction)"] --> B
-    Grant["KMS Grants\n(delegated, no IAM)"] --> B
-    style KP fill:#f9d,stroke:#333,color:#000
-    style IAM fill:#d4f1d4,stroke:#333,color:#000
-    style Grant fill:#d4e4f1,stroke:#333,color:#000
-```
-
-### Common Key Actions
-
-| Action | Description | Grant To |
-|--------|-------------|----------|
-| kms:CreateGrant | Create grants | Applications needing encryption |
-| kms:Decrypt | Decrypt data | Applications reading data |
-| kms:DescribeKey | View key metadata | Administrators, auditors |
-| kms:Encrypt | Encrypt data | Applications writing data |
-| kms:GenerateDataKey | Generate data keys | Applications using envelope encryption |
-| kms:GenerateDataKeyWithoutPlaintext | Generate encrypted-only | Applications without plaintext need |
-| kms:ListGrants | List grants | Administrators |
-| kms:RetireGrant | Retire grants | Administrators |
-| kms:RevokeGrant | Revoke grants | Administrators |
-
----
-
-## Encryption Strategies
-
-### Envelope Encryption
-
-| Step | Action | Description |
-|------|--------|-------------|
-| 1 | Generate Data Key | KMS generates plaintext + encrypted data key |
-| 2 | Encrypt data | Application uses plaintext data key |
-| 3 | Store encrypted data key | With encrypted data |
-| 4 | Discard plaintext | Remove from memory |
-| 5 | Decrypt when needed | KMS decrypts stored data key |
+| Control | Best practice |
+|---|---|
+| Key administrators | Use dedicated roles; do not give application roles administrative or deletion permissions |
+| Key users | Grant only the required cryptographic operations and resources |
+| Account principal | Understand that `arn:aws:iam::<account-id>:root` delegates authority to the account; it does not mean only the root user |
+| Service access | Restrict with `kms:ViaService`, encryption-context conditions, and source-account/source-ARN conditions where supported |
+| Deletion | Separate `kms:ScheduleKeyDeletion` and `kms:CancelKeyDeletion` from routine administration; require change control |
+| Policy safety | Keep a recoverable administrator path and do not bypass the policy lockout safety check without a controlled reason |
 
 ```mermaid
 flowchart LR
-    subgraph KMS["AWS KMS"]
-        CMK["Customer Master Key\n(CMK)"]
-    end
-    App["Application"] -->|"1. GenerateDataKey"| KMS
-    KMS -->|"plaintext + encrypted\ndata key"| App
-    App -->|"2. Encrypt data with\nplaintext data key"| ED["Encrypted Data"]
-    App -->|"3. Store encrypted\ndata key"| ED
-    App -->|"4. Discard plaintext"| X["X"]
-    App -->|"5. DecryptDataKey\n(with encrypted data key)"| KMS
-    KMS -->|"plaintext data key"| App
-    App -->|"6. Decrypt data"| PD["Plaintext Data"]
+    P["Principal"] --> I["IAM policy"]
+    I --> D{"Key policy permits\nIAM or principal?"}
+    D -->|No| X["Denied"]
+    D -->|Yes| C{"Conditions and explicit\ndenies satisfied?"}
+    C -->|No| X
+    C -->|Yes| K["KMS operation allowed"]
+    G["Grant"] --> C
 ```
 
-### Encryption by Service
+### Common Application Permissions
 
-| Service | KMS Integration | Recommendation |
-|---------|----------------|----------------|
-| **EBS** | Volume encryption | Enable default encryption |
-| **S3** | Server-side encryption | SSE-KMS for audit trail |
-| **RDS** | DB encryption | KMS encryption at rest |
-| **Redshift** | Cluster encryption | KMS encryption |
-| **EFS** | File system encryption | KMS encryption |
-| **SES** | Email encryption | KMS for stored emails |
-| **SQS** | Queue encryption | KMS encryption |
-| **SNS** | Topic encryption | KMS encryption |
-| **Secrets Manager** | Secret encryption | AWS managed or custom KMS |
-| **CloudTrail** | Trail encryption | KMS encryption |
-| **Backup** | Vault encryption | KMS encryption |
+| Pattern | Common permissions |
+|---|---|
+| Encrypt a small payload directly | `kms:Encrypt`, often `kms:DescribeKey` |
+| Decrypt existing ciphertext | `kms:Decrypt`, often `kms:DescribeKey` |
+| Envelope encryption | `kms:GenerateDataKey` to encrypt; `kms:Decrypt` to recover the data key |
+| Re-encrypt without exposing plaintext | `kms:ReEncryptFrom` on the source and `kms:ReEncryptTo` on the destination |
+| Service integration | Service-specific permissions; some services create grants on the caller's behalf |
 
----
+Avoid granting `kms:CreateGrant` broadly. When it is necessary, use `kms:GrantIsForAWSResource`, grant-operation conditions, and a specific grantee.
 
-## Key Rotation
+## Envelope Encryption
 
-### Rotation Options
+Use data keys for payloads larger than the KMS API plaintext limit and for high-throughput encryption. Store the encrypted data key with the ciphertext and erase the plaintext data key from memory as soon as practical.
 
-| Method | Frequency | Description |
-|--------|-----------|-------------|
-| **Automatic** | Annual by default; configurable rotation period from 90 days to 2,560 days (7 years) | Enable rotation, optionally set a custom period |
-| **Manual** | As needed | Create new key, migrate |
-| **On-demand** | Immediate | Rotate key material outside the automatic schedule, independent of automatic rotation setting |
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant KMS as AWS KMS
+    participant Store as Data store
+    App->>KMS: GenerateDataKey (with encryption context)
+    KMS-->>App: Plaintext data key + encrypted data key
+    App->>App: Encrypt payload locally
+    App->>Store: Ciphertext + encrypted data key + non-secret context
+    App->>App: Erase plaintext data key
+    Store-->>App: Ciphertext + encrypted data key
+    App->>KMS: Decrypt encrypted data key (same context)
+    KMS-->>App: Plaintext data key
+    App->>App: Decrypt payload and erase data key
+```
 
-### Rotation Best Practices
+- Bind ciphertext to its purpose with an encryption context. The context is authenticated but **not encrypted**, so never put secrets in it.
+- Use the AWS Encryption SDK or an AWS service integration instead of designing a custom envelope format.
+- Encryption context must match exactly for decrypt operations. Log and document the context schema.
 
-| Practice | Description |
-|----------|-------------|
-| **Enable automatic rotation** | For all customer-managed keys |
-| **Test after rotation** | Verify decryption works |
-| **Monitor rotation** | CloudWatch events for rotation |
-| **Document rotation** | Track rotation history |
-| **Plan for migration** | Manual rotation (creating a new key) requires re-encrypting data; automatic/on-demand rotation of a key's backing material does not require re-encryption |
+## Rotation and Replacement
 
----
+| Method | Applies to | Behavior |
+|---|---|---|
+| Automatic rotation | Customer managed, symmetric encryption keys with `AWS_KMS` key material | Default period is 365 days; configurable from 90 through 2,560 days |
+| On-demand rotation | Supported customer managed symmetric encryption keys with `AWS_KMS` or `EXTERNAL` origin | Rotates backing material without changing the key ID or re-encrypting existing ciphertext |
+| Manual replacement | All key types | Create a new key, move aliases/configuration, and optionally re-encrypt data |
+
+AWS managed keys rotate automatically every year and cannot be configured by customers. Automatic and on-demand rotation retain old backing material so existing ciphertext remains decryptable. Rotation does not mitigate compromised plaintext, excessively broad access, or leaked data keys; use manual replacement and re-encryption when the risk assessment requires a new key boundary.
 
 ## Grants
 
-### Grant Usage
+Grants are commonly used by integrated AWS services for temporary or delegated access. They are eventually consistent; use a grant token when the new grant must be used immediately.
 
-| Feature | Description | Use Case |
-|---------|-------------|----------|
-| **Grants** | Delegate KMS access without IAM | Cross-account, service integration |
-| **Constraints** | Limit grant operations | Encryption-only grants |
-| **Retirement** | Auto-retire after use | One-time operations |
-| **Tokens** | Secure grant reference | Grant identification |
+| Control | Recommendation |
+|---|---|
+| Operations | Include only the operations the grantee requires |
+| Grantee | Use a specific role or supported service principal |
+| `EncryptionContextEquals` | Require an exact encryption context for supported symmetric operations |
+| `EncryptionContextSubset` | Require named context pairs while allowing additional pairs |
+| Source ARN constraint | Restrict use to requests made for a specific AWS resource when supported |
+| Lifecycle | Retire temporary grants; reserve revoke for key administrators |
 
-### Grant Constraints
+`RetiringPrincipal` and the grant ID identify/manage a grant; they are not grant constraints.
 
-| Constraint | Description | Use Case |
-|------------|-------------|----------|
-| **EncryptionContextKeys** | Required encryption context keys | Context validation |
-| **EncryptionContextSubset** | Specific encryption context | Context restriction |
-| **EncryptionContextSuperset** | Minimum encryption context | Context flexibility |
-| **RecipientPrincipal** | Principal that can decrypt | Access delegation |
-| **RetiringPrincipal** | Principal that can retire | Grant management |
+## Monitoring and Incident Readiness
 
----
+| Signal | What to monitor |
+|---|---|
+| CloudTrail | Key creation, policy changes, grants, enable/disable, rotation settings, imported material, and deletion scheduling/cancellation |
+| KMS `SuccessfulRequest` metric | Successful cryptographic operations by key and operation; detect unexpected use and quota/cost growth |
+| Imported material | `SecondsUntilKeyMaterialExpiration` and alarms well before expiry |
+| Custom key stores | Throttling, proxy errors/latency, certificate expiry, credentials, and external key-manager health |
+| Service Quotas | Request-rate utilization and throttling |
 
-## Monitoring
+- Create high-severity alerts for `PutKeyPolicy`, `ScheduleKeyDeletion`, `DisableKey`, `DeleteImportedKeyMaterial`, and unexpected `CreateGrant` calls.
+- Maintain an inventory of key owners, dependent services, aliases, policy purpose, rotation method, and recovery/runbook links.
+- Before scheduling deletion, disable the key, monitor attempted use, inventory grants and aliases, and retain the full waiting period appropriate to the workload.
+- Test encrypted-data recovery, including cross-account and multi-Region failure scenarios. A KMS key cannot be exported as a backup.
 
-### CloudTrail Events
+## Cost and Scale
 
-| Event | Description | Alert |
-|-------|-------------|-------|
-| CreateKey | New key created | Verify authorization |
-| ScheduleKeyDeletion | Key deletion scheduled | Verify authorization |
-| CancelKeyDeletion | Deletion cancelled | Informational |
-| DisableKey | Key disabled | Verify authorization |
-| EnableKey | Key enabled | Informational |
-| UpdateKeyPolicy | Policy changed | Verify authorization |
-| RotateKey | Key rotated | Informational |
-| Encrypt/Decrypt | Encryption operations | Anomaly detection |
+KMS prices and free tiers vary by key type, operation, and Region. Use the current pricing page instead of embedding dollar amounts in architecture standards.
 
-### CloudWatch Metrics
+- Consolidate keys only when tenants, data classifications, administrators, retention, and blast-radius requirements permit it.
+- Cache data keys only with a bounded age/use count and an approved cryptographic materials cache.
+- Use `GenerateDataKeyWithoutPlaintext` when a component should provision encrypted data keys but must not receive plaintext key material.
+- Review KMS request quotas before high-throughput launches and use envelope encryption to avoid a KMS call per data block.
 
-| Metric | Description | Alert |
-|--------|-------------|-------|
-| EncryptionOperations | Encrypt calls | Anomaly detection |
-| DecryptionOperations | Decrypt calls | Anomaly detection |
-| GenerateDataKeyOperations | Data key generation | Anomaly detection |
-| InvalidSignatureErrors | Signature errors | Security alert |
-| KeyUsageMetrics | Key utilization | Capacity planning |
+## Authoritative References
 
----
-
-## Cost Optimization
-
-| Strategy | Description | Potential Savings |
-|----------|-------------|-------------------|
-| **Consolidate keys** | Fewer keys for similar purposes | Per-key cost ($1/month) |
-| **AWS-managed keys** | Free for AWS service encryption | Eliminate key costs |
-| **Right-size usage** | Use KMS only where needed | API call costs |
-| **Multi-Region replication** | Only for DR requirements | Per-region key cost |
-| **Cleanup unused keys** | Schedule deletion for unused keys | Eliminate waste |
-
-### Pricing
-
-| Component | Price |
-|-----------|-------|
-| **Customer-managed key** | $1.00/key/month |
-| **Encrypt/Decrypt** | $0.03 per 10,000 calls |
-| **GenerateDataKey** | $0.03 per 10,000 calls |
-| **Sign/Verify** | $0.05 per 10,000 calls |
-| **Multi-Region replication** | $1.00/key/month per region |
-| **AWS-managed keys** | Free |
-
----
-
-## Cross-Service Integration
-
-| Service | Integration | Purpose |
-|---------|------------|---------|
-| CloudTrail | API activity logging | Audit trail |
-| CloudWatch | Metrics, alarms | Monitoring |
-| Config | Key compliance | Governance |
-| Organizations | Multi-account key management | Enterprise |
-| Backup | Encrypted backups | Data protection |
-| Secrets Manager | Secret encryption | Credential security |
-| SSM Parameter Store | Parameter encryption | Configuration security |
+- [AWS KMS concepts and key types](https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html)
+- [AWS KMS key states](https://docs.aws.amazon.com/kms/latest/developerguide/key-state.html)
+- [AWS KMS key policies](https://docs.aws.amazon.com/kms/latest/developerguide/key-policies.html)
+- [AWS KMS grants and constraints](https://docs.aws.amazon.com/kms/latest/developerguide/grants.html)
+- [Rotating AWS KMS keys](https://docs.aws.amazon.com/kms/latest/developerguide/rotate-keys.html)
+- [AWS KMS CloudWatch metrics](https://docs.aws.amazon.com/kms/latest/developerguide/monitoring-cloudwatch.html)
+- [AWS KMS pricing](https://aws.amazon.com/kms/pricing/)

@@ -1,220 +1,147 @@
-# WAF Best Practices
+# AWS WAF Best Practices
 
-## Web ACL Configuration
+AWS WAF inspects HTTP(S) requests sent to supported resources. It complements, but does not replace, secure application code, authentication, authorization, DDoS protection, and dependency-level rate controls.
 
-### Rule Types
+## Scope and Associations
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| **IP set** | Allow/block IP addresses | Known bad actors, geo-blocking |
-| **Rate-based** | Throttle by request rate | DDoS, brute force |
-| **Regex pattern** | Match URL patterns | Custom attack patterns |
-| **SQL injection** | Detect SQL injection | OWASP Top 10 |
-| **XSS** | Detect cross-site scripting | OWASP Top 10 |
-| **Geo-match** | Allow/block by country | Geographic restrictions |
-| **Label match** | Match rule labels | Complex rule logic |
-| **Managed rule** | AWS/Partner managed rules | Pre-built protection |
+| Web ACL scope | Supported association examples |
+|---|---|
+| `CLOUDFRONT` (global) | CloudFront distributions; create and manage the web ACL in `us-east-1` |
+| `REGIONAL` | Application Load Balancer, API Gateway **REST API**, AppSync GraphQL API, Cognito user pool, App Runner service, Verified Access instance, Amplify application, and other resource types listed in the current AWS WAF documentation |
 
-### Rule Actions
+AWS WAF does not associate directly with Network Load Balancers, Global Accelerator, API Gateway HTTP APIs/WebSocket APIs, or arbitrary EC2 instances. Put a supported HTTP entry point in front of those workloads when WAF inspection is required.
 
-| Action | Description | Use Case |
-|--------|-------------|----------|
-| **ALLOW** | Permit the request | Trusted traffic |
-| **BLOCK** | Deny the request | Attack traffic |
-| **COUNT** | Count without acting | Monitoring, testing |
-| **CAPTCHA** | Challenge the requester | Bot mitigation |
-| **Challenge** | JavaScript challenge | Bot detection |
+## Rule Evaluation and Actions
+
+Rules run in ascending numeric priority. A terminating action ends evaluation; non-terminating actions can add labels that later rules match.
+
+| Action | Terminating behavior | Use |
+|---|---|---|
+| `Allow` | Terminates | Explicit, narrow allow rules; avoid broad bypasses |
+| `Block` | Terminates | Reject known unwanted requests, optionally with a custom response |
+| `Count` | Continues | Test and observe a rule without enforcement |
+| `CAPTCHA` | Terminates when the token is absent/invalid; continues with a valid token | Human interaction for suspicious browser traffic |
+| `Challenge` | Terminates when the token is absent/invalid; continues with a valid token | Silent browser challenge for suspicious automated traffic |
 
 ```mermaid
 flowchart TD
-    R["Incoming Request"] --> W["Web ACL\n(rule evaluation)"]
-    W -->|"Priority 100"| R1["Rate-based rule"]
-    R1 -->|"exceeds limit"| B1["BLOCK"]
-    R1 -->|"within limit"| R2["IP set rule"]
-    R2 -->|"IP blocked"| B2["BLOCK"]
-    R2 -->|"IP allowed"| R3["Managed rule group\n(SQLi, XSS, etc.)"]
-    R3 -->|"match"| B3["BLOCK"]
-    R3 -->|"no match"| R4["Regex / Geo-match"]
-    R4 -->|"match"| B4["BLOCK"]
-    R4 -->|"no match"| A1["ALLOW → Origin"]
+    Q["HTTP request"] --> R1["Priority 0: narrow trusted exception"]
+    R1 -->|terminating match| A["Allow"]
+    R1 -->|no match| R2["Priority 10: rate and bot controls"]
+    R2 -->|invalid token or block| B["Challenge / CAPTCHA / Block"]
+    R2 -->|continue| R3["Priority 20+: managed and custom rules"]
+    R3 -->|terminating match| B
+    R3 -->|no terminating match| D["Web ACL default action"]
+    D --> O["Protected resource"]
 ```
 
----
+- Keep allowlist exceptions narrow and place them only after deciding which controls they are allowed to bypass.
+- Use labels to separate detection from enforcement and to combine managed-rule results with application context.
+- Give every rule and web ACL a unique CloudWatch metric name and enable visibility configuration.
 
-## Managed Rule Groups
+## Baseline Protection
 
-### AWS Managed Rules
+Start with threats demonstrated by the application and threat model, not every rule group at once.
 
-| Rule Group | Description | Cost |
-|------------|-------------|------|
-| **AWSManagedRulesCommonRuleSet** | SQLi, XSS, common attacks | Free |
-| **AWSManagedRulesAmazonIpReputationList** | AWS reputation data | Free |
-| **AWSManagedRulesLinuxRuleSet** | Linux exploit protection | Free |
-| **AWSManagedRulesSQLiRuleSet** | SQL injection protection | Free |
-| **AWSManagedRulesUnixRuleSet** | Unix exploit protection | Free |
-| **AWSManagedRulesWindowsRuleSet** | Windows exploit protection | Free |
-| **AWSManagedRulesAdminProtectionRuleSet** | Admin path protection | Free |
-| **AWSManagedRulesKnownBadInputsRuleSet** | Known exploit patterns (Log4j, etc.) | Free |
-| **AWSManagedRulesWordPressRuleSet** | WordPress protection | Free |
-| **AWSManagedRulesBotControlRuleSet** | Bot detection and control | Paid |
-| **AWSManagedRulesATPRuleSet** | Account takeover (fraud control) prevention | Paid |
-| **AWSManagedRulesACFPRuleSet** | Account creation fraud prevention | Paid |
+| Control | Guidance |
+|---|---|
+| AWS Managed Rules baseline | Evaluate Common Rule Set, Known Bad Inputs, Amazon IP Reputation, and Anonymous IP List as relevant |
+| Platform-specific groups | Add Linux, Unix, Windows, PHP, or WordPress groups only for technology actually exposed |
+| Injection protection | Evaluate SQL database and application-specific injection rules; tune body-size and encoding behavior |
+| Admin paths | Restrict administrative endpoints by identity/network and consider Admin Protection rules |
+| Account abuse | Evaluate Account Takeover Prevention (ATP) for login pages and Account Creation Fraud Prevention (ACFP) for registration pages |
+| Bots | Use Bot Control when category, signal, or targeted bot protection justifies its additional request charges |
 
-### Recommendation
+AWS Managed Rules can change. Subscribe to update notifications, pin versions where the group supports versioning, review expiry notifications, and test a new version before promotion. “Free” managed groups can still incur normal web ACL, rule, request, logging, and capacity-related charges; intelligent threat mitigation groups have additional request fees.
 
-| Environment | Recommended Rules |
-|-------------|------------------|
-| **Production (web)** | CommonRuleSet + SQLi + XSS + AdminProtection |
-| **Production (API)** | CommonRuleSet + APIProtocol + Rate-based |
-| **E-commerce** | CommonRuleSet + BotControl + Geo-match |
-| **Internal app** | IP allowlist + Rate-based |
-| **Public-facing** | All free rules + Rate-based |
+### Safe Rollout
 
----
+1. Define success metrics and expected legitimate traffic.
+2. Deploy new managed groups with rule-action overrides to `Count` where supported.
+3. Inspect sampled requests and full logs, then add the narrowest exclusions or scope-down statements.
+4. Promote rules to `Block`, `Challenge`, or `CAPTCHA` in stages.
+5. Watch business KPIs and WAF metrics after every change; retain an immediate rollback path.
+
+Do not exclude an entire managed rule group because of one false positive. Override or scope down the specific inner rule and document the risk accepted.
 
 ## Rate-Based Rules
 
-### Configuration
-
-| Setting | Recommendation | Reason |
-|---------|---------------|--------|
-| **Limit** | Based on expected traffic | Prevent false positives |
-| **Aggregate key** | IP, ACL, or forwarded IP | Granularity |
-| **Scope down** | Specific paths or headers | Targeted throttling |
-| **Action** | Count first, then block | Safe deployment |
-| **Exclusion** | Trusted IPs, health checks | Avoid blocking legitimate traffic |
-
-### Rate Calculation
-
-| Factor | Consideration |
-|--------|---------------|
-| **Baseline traffic** | Normal request rate per IP |
-| **Peak traffic** | Expected maximum rate |
-| **Bot traffic** | Legitimate bots (search engines) |
-| **CDN effect** | CloudFront origin vs edge |
-| **API patterns** | Expected API call patterns |
-
----
-
-## Bot Control
-
-### Bot Categories
-
-| Category | Action | Description |
-|----------|--------|-------------|
-| **Known bots** | Allow | Search engines, monitoring |
-| **Verified bots** | Allow | Verified good bots |
-| **Likely bots** | Challenge | Suspected bots |
-| **Custom bots** | Configure | Application-specific |
-| **Bad bots** | Block | Known malicious bots |
-
-### CAPTCHA Configuration
+A rate-based rule tracks request aggregates over a configurable evaluation window and applies its action when an aggregate exceeds the configured limit. It is not an exact request quota and detection can lag traffic changes.
 
 | Setting | Recommendation |
-|---------|---------------|
-| **Insertion mode** | INLINE or REDIRECT | User experience |
-| **Region restriction** | Match user regions | Availability |
-| **Exclusion** | Trusted IPs, known bots | False positive reduction |
-| **Response** | Custom blocked page | User experience |
+|---|---|
+| Aggregation | Use source IP/forwarded IP for simple clients; use custom keys such as headers, cookies, URI path, labels, or combinations when identity is not represented by IP |
+| Forwarded IP | Trust the forwarding header only when an upstream proxy controls it; define fallback behavior for malformed/missing values |
+| Constant aggregation | Pair with a scope-down statement to rate-limit all requests in a selected population |
+| Evaluation window | Choose based on burst tolerance and desired response speed |
+| Limit | Derive from p95/p99 legitimate behavior, load tests, and backend capacity—not a generic number |
+| Exceptions | Separate verified health checks, trusted automation, and known bots with narrow conditions |
+| Deployment | Start with `Count`; use managed keys or custom keys that attackers cannot cheaply rotate |
 
----
+Use application-identity quotas in API Gateway, Cognito, or the application when the requirement is a strict per-customer quota. WAF rate-based rules are primarily a protective control.
 
-## Logging
+## Request Inspection Limits
 
-### Log Configuration
+AWS WAF inspects only the configured portion of request bodies and other components. Oversize handling can allow, block, or continue inspection depending on the statement and configuration.
 
-| Setting | Recommendation |
-|---------|---------------|
-| **Enable logging** | For all production Web ACLs |
-| **Redacted fields** | Remove sensitive data | Privacy compliance |
-| **Log destination** | CloudWatch Logs or S3 | Analysis and storage |
-| **Log format** | JSON for parsing | Analysis |
-| **Metric value** | COUNT for all rules | Visibility |
+- Know the body inspection limit for each associated resource type and any configured body-size increase.
+- Set oversize handling deliberately, especially for upload and API endpoints.
+- Normalize and constrain request formats in the application; WAF transformations are not a substitute for server-side validation.
+- Monitor `SizeRestrictions_*` managed-rule labels/matches before creating exclusions.
+- Budget web ACL capacity units (WCUs). Validate capacity before deployment and request quota increases only after simplifying duplicated logic.
 
-### Log Analysis
+## CAPTCHA, Challenge, and Token Handling
 
-| Use Case | Tool | Description |
-|----------|------|-------------|
-| **Real-time monitoring** | CloudWatch Logs Insights | Live analysis |
-| **Historical analysis** | Athena on S3 | Query large datasets |
-| **Visualization** | QuickSight | Dashboards |
-| **Alerting** | CloudWatch alarms | Threshold-based |
-| **Threat detection** | GuardDuty | Security findings |
+- These actions are intended for clients that can run the AWS WAF JavaScript integration or complete an interstitial challenge. API, machine-to-machine, accessibility, and non-browser clients need a compatible path.
+- Configure immunity times according to risk. Longer immunity reduces repeated challenges but increases the value of a stolen token.
+- Configure token domains only for domains that legitimately share tokens.
+- Prefer `Challenge` for low-friction signals and `CAPTCHA` when stronger human interaction is warranted.
+- Do not assume a valid token authenticates a user; it only represents successful WAF challenge handling.
 
----
+## Logging and Data Protection
 
-## Performance
+AWS WAF can send full logs to Amazon CloudWatch Logs, Amazon S3, or Amazon Data Firehose. Destination naming and permissions must follow the WAF logging requirements.
 
-### Impact Analysis
+| Control | Best practice |
+|---|---|
+| Full logging | Enable for production web ACLs, subject to data-classification and cost requirements |
+| Logging filters | Keep blocked/challenged traffic and security-relevant labels; sample or drop routine allowed traffic when justified |
+| Redaction | Redact authorization, cookies, query fields, or other sensitive components before delivery |
+| Data protection | Use WAF data-protection settings where applicable and restrict access to logs and sampled requests |
+| Retention | Set explicit retention/lifecycle and deletion controls on the destination |
+| Encryption | Use destination encryption and tightly scoped KMS/key policies if customer managed keys are required |
 
-| Factor | Impact | Mitigation |
-|--------|--------|------------|
-| **Rule count** | More rules = higher latency | Optimize rule count |
-| **Regex complexity** | Complex regex = higher latency | Simplify patterns |
-| **Rule order** | Early match = faster | Prioritize common rules |
-| **Managed rules** | Optimized by AWS | Use managed rules |
-| **Scope down statements** | More specific = faster | Target specific paths |
+Redacting fields in WAF logs does not redact the same fields from request sampling. Control access to sampled requests separately. Avoid logging secrets in URIs because they can also appear in origin and CDN logs.
 
-### Optimization
+### Metrics and Alarms
 
-| Practice | Description |
-|----------|-------------|
-| **Prioritize rules** | Most common rules first |
-| **Use managed rules** | AWS-optimized patterns |
-| **Scope down** | Limit rule scope to relevant paths |
-| **Regular review** | Remove unused rules |
-| **Test in COUNT mode** | Validate before blocking |
+Use `AWS/WAFV2` metrics such as `AllowedRequests`, `BlockedRequests`, `CountedRequests`, `CaptchaRequests`, `ChallengeRequests`, and rule/label metrics. Alarm on ratios and changes from baseline rather than universal percentages. Correlate with origin 4xx/5xx errors, latency, authentication failures, conversions, and Shield events.
 
----
+## Organization and Operations
 
-## Cost Optimization
+- Manage common policies across accounts with AWS Firewall Manager while allowing documented application-specific exceptions.
+- Define web ACLs, IP sets, regex pattern sets, logging, and alarms as infrastructure as code.
+- Separate deployment roles from security approval where risk requires it.
+- Review sampled requests, managed-rule changes, expiring versions, WCU utilization, logging health, and stale IP sets on a schedule.
+- Use Firewall Manager compliance findings or AWS Config where supported to find unprotected resources.
+- Keep break-glass procedures for an accidental block, including a tested way to update the web ACL without depending on the affected application.
 
-| Strategy | Description | Potential Savings |
-|----------|-------------|-------------------|
-| **Right-size Web ACLs** | Only protect needed resources | Per-request cost |
-| **Use free managed rules** | AWS free rule groups | Rule group cost |
-| **Optimize rule count** | Fewer rules = lower cost | Processing cost |
-| **Log retention** | Right-size log retention | Storage cost |
-| **Shared Web ACLs** | Regional sharing | Rule duplication |
-| **Rule priority** | Optimize evaluation order | Processing efficiency |
+## Cost Management
 
-### Pricing
+AWS WAF charges depend on web ACLs, rules/rule groups, inspected requests, request body size, CAPTCHA/Challenge use, intelligent threat mitigation, and logging destinations. Prices vary by Region and feature.
 
-| Component | Price |
-|-----------|-------|
-| **Web ACL** | $0.50/day per region |
-| **Rules** | $1.00/day per rule |
-| **Requests** | $0.60 per M requests |
-| **Managed rules** | Free (AWS-managed basic), $4-5/day (Bot Control, premium) |
-| **Logging** | CloudWatch/S3 pricing |
+- Use scope-down statements to avoid sending irrelevant requests into paid managed rule groups.
+- Use logging filters and destination lifecycle policies to control analytics cost without losing security-relevant records.
+- Consolidate web ACLs only when applications can share ownership, policy, change cadence, and blast radius.
+- Rule priority generally affects behavior, not the base number of configured-rule charges; do not claim that reordering rules alone reduces WAF price.
 
----
+## Authoritative References
 
-## Cross-Service Integration
-
-| Service | Integration | Purpose |
-|---------|------------|---------|
-| CloudFront | Edge-level protection | Global WAF |
-| ALB | Application-level protection | Load balancer WAF |
-| API Gateway | API-level protection | API security |
-| Global Accelerator | Anycast protection | Global WAF |
-| CloudWatch | Logging, metrics | Monitoring |
-| Shield Advanced | DDoS + WAF | Combined protection |
-| GuardDuty | Threat detection | Security findings |
-| Security Hub | Centralized findings | Compliance |
-
-```mermaid
-flowchart LR
-    U["User / Client"] --> CF["CloudFront\n(edge WAF)"]
-    U --> GA["Global Accelerator\n(anycast WAF)"]
-    CF --> AG["API Gateway\n(API WAF)"]
-    CF --> ALB["Application LB\n(regional WAF)"]
-    AG --> L["Lambda / ECS"]
-    ALB --> L
-    GA --> ALB
-    CF -->|"logs"| CW["CloudWatch"]
-    ALB -->|"logs"| CW
-    AG -->|"logs"| CW
-    CW --> SH["Security Hub"]
-    CW --> GD["GuardDuty"]
-```
+- [AWS WAF supported resources](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html)
+- [How AWS WAF rules and actions work](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-actions.html)
+- [Testing and tuning AWS WAF protections](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-testing.html)
+- [Rate-based rule statements](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html)
+- [Oversize request components](https://docs.aws.amazon.com/waf/latest/developerguide/waf-oversize-request-components.html)
+- [AWS WAF logging destinations](https://docs.aws.amazon.com/waf/latest/developerguide/logging-destinations.html)
+- [AWS WAF metrics](https://docs.aws.amazon.com/waf/latest/developerguide/waf-metrics.html)
+- [AWS WAF pricing](https://aws.amazon.com/waf/pricing/)

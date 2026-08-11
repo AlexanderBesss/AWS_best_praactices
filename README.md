@@ -1,6 +1,8 @@
 # AWS Best Practices Documentation
 
-A comprehensive, structured reference guide covering best practices across all major AWS services.
+A curated, structured reference guide covering commonly used AWS services and architecture patterns. It is not an exhaustive catalog of AWS services.
+
+> **Scope and freshness:** AWS features, quotas, pricing, and regional availability change frequently. Treat example values as starting points, verify workload-specific settings in the linked AWS documentation and Service Quotas, and validate prices for your Region with the [AWS Pricing Calculator](https://calculator.aws/).
 
 ---
 
@@ -29,6 +31,10 @@ A comprehensive, structured reference guide covering best practices across all m
 | [Error Handling Patterns](Design/03-error-handling-patterns.md) | Retry strategies, circuit breakers, idempotency, bulkhead, graceful degradation, chaos engineering |
 | [Cross-Cutting Patterns](Design/04-cross-cutting-patterns.md) | Saga, CQRS, event sourcing, multi-tenant, batch processing, multi-region active-active |
 | [Database Integration Patterns](Design/05-database-integration-patterns.md) | Lambda + DynamoDB/RDS patterns: RDS Proxy, Streams, CQRS, multi-region, transactional outbox |
+| [High Availability & DR Patterns](Design/06-high-availability-dr-patterns.md) | Multi-AZ foundations, backup and restore, pilot light, warm standby, multi-site, and ARC |
+| [Caching & Content Delivery Patterns](Design/07-caching-content-delivery-patterns.md) | CloudFront, cache-aside, DAX, and edge-compute patterns |
+| [Compute & Deployment Patterns](Design/08-compute-deployment-patterns.md) | EC2/ECS/EKS architectures, sidecars, blue-green, canary, and migration patterns |
+| [Multi-Account & Landing Zone Patterns](Design/09-multi-account-landing-zone-patterns.md) | Organizations, Control Tower, centralized networking/logging, and cross-account access |
 
 ### Serverless
 | Document | Description |
@@ -42,7 +48,7 @@ A comprehensive, structured reference guide covering best practices across all m
 |----------|-------------|
 | [CloudFront Best Practices](Networking/CloudFront-Best-Practices.md) | CDN configuration, cache behavior, origin shielding, and security |
 | [Route 53 Best Practices](Networking/Route53-Best-Practices.md) | DNS routing policies, health checks, failover, and latency-based routing |
-| [Load Balancing Best Practices](Networking/Load-Balancing-Best-Practices.md) | ALB/NLB/GALB selection, target groups, health checks, and SSL termination |
+| [Load Balancing Best Practices](Networking/Load-Balancing-Best-Practices.md) | ALB/NLB/GWLB selection, target groups, health checks, and TLS termination |
 
 ### DevOps
 | Document | Description |

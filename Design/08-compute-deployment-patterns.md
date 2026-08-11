@@ -103,21 +103,22 @@ graph TB
 
 As the number of services grows, service-to-service calls need consistent retries, timeouts, mTLS, and traffic shaping — without a mesh, each service team reimplements this logic independently (or skips it), producing inconsistent failure handling and no uniform way to observe cross-service traffic. A service mesh centralizes this via sidecar proxies so application code stays free of networking concerns and policies like retry budgets, circuit breaking, and mTLS are enforced the same way across every service.
 
-**Trade-off:** every request now traverses at least one extra proxy hop per hop, adding latency; every pod carries an extra sidecar container, adding memory/CPU footprint; and the mesh control plane (Istio, Cilium, App Mesh) is itself another distributed system to operate, upgrade, and debug. For a handful of services, this operational tax exceeds the benefit of centralized traffic policy.
+**Trade-off:** a sidecar-based mesh adds proxy hops and per-pod CPU/memory, while the mesh control plane is another distributed system to operate and debug. Sidecarless/managed connectivity options have different feature and cost trade-offs. AWS App Mesh reaches end of support on September 30, 2026 and must not be selected for a new design.
 
 Key decisions when running an EKS microservices architecture with a service mesh.
 
 | Decision | Guidance |
 |---|---|
-| Mesh | App Mesh (legacy) or Istio/Cilium on EKS for mTLS, traffic shaping, retries between services |
+| Service networking | Istio or another supported Kubernetes mesh when full mesh semantics are required; consider VPC Lattice for managed cross-VPC/account service connectivity |
 | Ingress | AWS Load Balancer Controller for ALB/NLB integration |
 | Node strategy | Managed node groups or Fargate profiles depending on workload isolation needs |
 | Observability | ADOT Collector → X-Ray/CloudWatch for distributed tracing across mesh |
 
 ### When NOT to Use
 
-- Don't adopt a service mesh for fewer than ~5-10 services — the operational overhead outweighs the benefit
+- Don't adopt a service mesh until explicit traffic-policy, identity, or observability requirements justify its operational overhead; service count alone is not a reliable threshold
 - Don't use EKS if the team lacks Kubernetes operational expertise and ECS/Fargate would meet the same needs more simply
+- Don't start or expand an AWS App Mesh design; migrate before its September 30, 2026 end of support
 
 ---
 
@@ -145,7 +146,7 @@ Common sidecar containers and the cross-cutting concern each handles.
 
 | Common Sidecars | Purpose |
 |---|---|
-| Envoy / App Mesh proxy | mTLS, traffic routing, retries |
+| Envoy / supported mesh proxy | mTLS, traffic routing, retries |
 | ADOT Collector | Metrics/traces export |
 | FireLens / Fluent Bit | Log routing to CloudWatch/OpenSearch |
 | Secrets/config agent | Fetch and refresh secrets without app code changes |
@@ -208,8 +209,8 @@ How to implement canary traffic shifting per compute platform.
 | Implementation | Mechanism |
 |---|---|
 | Lambda | CodeDeploy canary/linear traffic shifting with CloudWatch alarm rollback |
-| ECS | CodeDeploy canary via ALB weighted target groups |
-| API Gateway | Stage-level canary deployment with percentage traffic split |
+| ECS | CodeDeploy canary/linear deployment with ALB production and optional test listeners |
+| API Gateway REST API | Stage-level canary deployment with percentage traffic split |
 
 ### When NOT to Use
 
@@ -262,3 +263,13 @@ Common compute and deployment mistakes and the fix for each.
 | **Manual, undocumented deployment steps** | Slow, error-prone releases | Codify via CodeDeploy/CodePipeline with automated rollback |
 | **No health checks gating deployment** | Bad version gets full traffic before detection | Attach CloudWatch alarms to blue-green/canary rollback triggers |
 | **Big-bang legacy replacement** | High-risk, hard-to-reverse cutover | Prefer Strangler Fig for large/critical legacy systems |
+
+---
+
+## Authoritative References
+
+- [AWS App Mesh end-of-support notice](https://docs.aws.amazon.com/app-mesh/latest/userguide/what-is-app-mesh.html)
+- [Amazon ECS deployment types](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-types.html)
+- [Amazon ECS blue/green deployment with CodeDeploy](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-bluegreen.html)
+- [AWS Load Balancer Controller on Amazon EKS](https://docs.aws.amazon.com/eks/latest/userguide/aws-load-balancer-controller.html)
+- [Lambda deployments with CodeDeploy](https://docs.aws.amazon.com/codedeploy/latest/userguide/deployment-steps-lambda.html)

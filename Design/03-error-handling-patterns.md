@@ -18,6 +18,7 @@ Building resilient serverless architectures requires defense-in-depth error hand
 - [Pattern 7: Chaos Engineering for Serverless](#pattern-7-chaos-engineering-for-serverless)
 - [Comprehensive Error Handling Checklist](#comprehensive-error-handling-checklist)
 - [Anti-Patterns to Avoid](#anti-patterns-to-avoid)
+- [Authoritative References](#authoritative-references)
 
 ---
 
@@ -27,27 +28,27 @@ Default and configurable retry behavior for each AWS service that can drive Lamb
 
 | Service | Retry Mechanism | Default Behavior | Configurable Range |
 |---------|----------------|-----------------|-------------------|
-| **Lambda Async** | Redrive policy | 0 retries, then DLQ | 0-2 retries |
-| **SQS → Lambda** | Event Source Mapping | 10,000 retries (~3 days) | 0-10,000 |
-| **SNS → Lambda** | SNS retry | Exponential backoff, ~15 hours | Custom DeliveryPolicy |
-| **SNS → SQS** | SNS retry | Exponential backoff | Custom DeliveryPolicy |
-| **DynamoDB Stream** | Event Source Mapping | 18,000 retries (~6 hours) | 0-18,000 |
+| **Lambda Async** | Internal async queue | Two retries for function errors by default; throttling/system errors retry for up to the event-age limit | `MaximumRetryAttempts`: 0-2; event age: up to 6 hours; optional destination/DLQ |
+| **SQS → Lambda** | Visibility timeout + SQS redrive policy | Failed messages become visible again; Lambda does not expose a retry-count setting for SQS | Set queue `maxReceiveCount`, retention, visibility timeout, and DLQ |
+| **SNS → Lambda/SQS** | SNS endpoint delivery policy | AWS-managed endpoint retries can continue for 100,015 attempts over 23 days for server-side failures | Service-managed; configure a subscription redrive policy to an SQS DLQ |
+| **SNS → HTTP/S** | SNS delivery policy | Endpoint-specific retry phases | Custom delivery policy, with total retry time capped at 3,600 seconds |
+| **DynamoDB Stream** | Event Source Mapping | Retries until the record expires (24-hour stream retention) by default | `MaximumRetryAttempts`: -1 or 0-10,000; record age and failure destination are configurable |
 | **EventBridge** | Rule retry | Up to 24h, 185 attempts, exponential backoff + jitter | `MaximumEventAgeInSeconds` (60-86400), `MaximumRetryAttempts` (0-185), Dead-letter target (DLQ) |
-| **Step Functions** | Catch/Retry state | No retry unless `Retry` is declared | `MaxAttempts`: 3 default, up to 99,999,999 |
+| **Step Functions** | `Retry`/`Catch` fields on supported states | No retry unless a retrier is declared | A retrier defaults to 3 attempts when `MaxAttempts` is omitted; set workload-specific bounds |
 | **API Gateway** | No built-in retry | Returns error | Client-side or Lambda |
 
 ---
 
 ## Pattern 1: Exponential Backoff with Jitter
 
-The foundation of all retry strategies.
+A common foundation for bounded retry strategies.
 
 ```mermaid
 graph LR
     A[Initial Request] --> B{Success?}
     B -->|Yes| C[Complete]
     B -->|No| D{Retry Count<br/>< Max?}
-    D -->|No| E[Send to DLQ]
+    D -->|No| E[Terminal handling<br/>error / destination / DLQ]
     D -->|Yes| F[Wait: base * 2^attempt + jitter]
     F --> G[Retry Request]
     G --> B
@@ -93,28 +94,29 @@ Whether an error should be retried and with what strategy, by error type.
 | Error Type | Retry? | Strategy |
 |-----------|--------|----------|
 | **5xx / Throttling** | Yes | Exponential backoff + jitter |
-| **4xx (except 429)** | No | Send to DLQ immediately |
-| **Timeout** | Yes | Increase timeout, then retry |
-| **Connection Error** | Yes | Quick retry (max 2-3, then DLQ for persistent issues) |
-| **Validation Error** | No | Send to DLQ (won't fix on retry) |
-| **Idempotency Conflict** | No | Skip or handle in code |
+| **Most 4xx** | Usually no | Treat validation/auth errors as terminal; handle explicitly retryable statuses such as 408, 409, and 429 by API contract |
+| **Timeout** | Sometimes | Retry only idempotent operations within the remaining deadline; tune connect/read timeouts from measured latency |
+| **Connection Error** | Sometimes | Retry idempotent operations with a small capped budget and jitter |
+| **Validation Error** | No | Reject synchronously; for asynchronous flows, quarantine or use a DLQ only when investigation or replay is required |
+| **Idempotency Conflict** | No | Return the stored result, an accepted/in-progress response, or a contract-appropriate conflict |
 
 ### Cost Considerations
 
-Retries multiply invocation costs. A message retried 10,000 times costs 10,000x a single invocation. Set appropriate retry limits and use DLQs to contain costs. Circuit breakers also add overhead — measure failure rates to tune thresholds.
+Retries multiply request and compute costs and can amplify pressure on a failing dependency. Set bounded retry budgets where the source supports them, use retention/record-age limits and failure destinations, and measure retry volume before tuning thresholds.
 
 ---
 
 ## Pattern 2: Multi-Layer Dead-Letter Queue Strategy
 
-A comprehensive DLQ strategy with escalation levels.
+An illustrative DLQ escalation design. The queue count, retry count, and delay at each level must come from the workload's recovery objective and dependency behavior; many workloads need only one monitored DLQ.
 
 ```mermaid
 graph TB
     A[Primary SQS Queue] -->|Event Source Mapping| B[Lambda Processor]
+    B -->|Failure, message becomes visible again| A
     
     subgraph "Level 1: Automatic Retry"
-        B -->|Max Retries: 3| C[DLQ Level 1<br/>retry-queue-l1]
+        A -->|SQS redrive after maxReceiveCount| C[DLQ Level 1<br/>retry-queue-l1]
         C -->|Scheduled Lambda| D[Lambda<br/>DLQ L1 Processor]
         D -->|Retry after 5min| A
     end
@@ -147,11 +149,11 @@ Alarm thresholds and the action to take for each layer of the DLQ escalation cha
 
 | Metric | Threshold | Action |
 |--------|-----------|--------|
-| DLQ L1 ApproximateDepth > 0 | Warning | Log alert |
-| DLQ L2 ApproximateDepth > 10 | Error | Page on-call |
-| DLQ L3 ApproximateDepth > 0 | Critical | Immediate escalation |
-| DLQ AgeOfOldestMessage > 1hr | Warning | Investigate |
-| Lambda Errors > 10/min | Error | Check logs |
+| L1 `ApproximateNumberOfMessagesVisible` > 0 | Warning | Log alert |
+| L2 `ApproximateNumberOfMessagesVisible` > workload threshold | Error | Page on-call |
+| L3 `ApproximateNumberOfMessagesVisible` > 0 | Critical | Immediate escalation |
+| `ApproximateAgeOfOldestMessage` exceeds response SLO | Warning | Investigate |
+| Lambda errors exceed the workload's error-budget threshold | Error | Check logs, traces, deployments, and dependencies |
 
 ---
 
@@ -186,11 +188,11 @@ graph TB
 
 Without a circuit breaker, a Lambda function keeps calling a failing or slow downstream dependency on every invocation, and each call waits out its full connection/read timeout before failing. Under concurrent load this ties up Lambda concurrency, database connections (via RDS Proxy), and thread pools purely waiting on a dependency that isn't going to respond — the caller's own resource exhaustion becomes a second outage on top of the original one, and it propagates upstream to whatever called the caller. Retrying blindly (Pattern 1) makes this worse, not better, when the root cause is a hard outage rather than a transient blip.
 
-**Trade-off:** the circuit breaker adds a layer of state (current state, failure counts, timers) that must be shared correctly across concurrent Lambda invocations — in-memory state doesn't persist between executions, so a real implementation needs an external store (DynamoDB, ElastiCache) or relies on the alpha Powertools decorator's per-invocation behavior, adding latency and a dependency of its own. It also means legitimate requests get rejected during the OPEN window even if the downstream service has already recovered, until the next half-open probe succeeds.
+**Trade-off:** the circuit breaker adds state (current state, failure counts, timers) that must be shared correctly across concurrent Lambda execution environments. A purely in-memory library only protects one warm environment; a function-wide breaker needs an external store such as DynamoDB or ElastiCache, which adds latency and another dependency. Legitimate requests can also be rejected during the OPEN window after the downstream service has recovered, until a half-open probe succeeds.
 
 ### Circuit Breaker Configuration
 
-Tunable parameters that control when the circuit opens, closes, and retests the downstream service.
+Illustrative tunable parameters that control when the circuit opens, closes, and retests the downstream service. Derive real values from measured latency, request volume, error budgets, and recovery time; the example numbers are not AWS defaults.
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
@@ -200,23 +202,23 @@ Tunable parameters that control when the circuit opens, closes, and retests the 
 | `monitoringPeriod` | 30s | Window for failure counting |
 | `failureRate` | 0.5 | 50% failure rate triggers open |
 
-### AWS Implementation Options
+### Implementation Options and Adjacent Controls
 
 Where to implement circuit breaking depending on the layer and complexity you're willing to take on.
 
 | Approach | Tool | Complexity |
 |----------|------|-----------|
-| **Application-level** | Powertools Circuit Breaker | Low, in-code |
-| **Infrastructure-level** | Step Functions Catch | Medium |
-| **Network-level** | ALB health checks + target groups | High |
-| **API-level** | API Gateway usage plan throttling | Medium |
+| **Application-level** | A maintained language library; use shared state when the breaker must span execution environments | Medium |
+| **Proxy/service-mesh level** | Envoy/Istio circuit breaking and outlier detection | Medium-High |
+| **Workflow-level (not a breaker)** | Step Functions `Retry`/`Catch` for bounded retries and fallbacks | Medium |
+| **Load shedding (not a breaker)** | API Gateway throttling, reserved concurrency, and ALB health checks | Low-Medium |
 
-### Powertools Circuit Breaker Example
+### Circuit Breaker Sketch
 
-Powertools for AWS Lambda (Python) ships a `circuit_breaker` decorator (currently under the `circuit_breaker_alpha` namespace — pin your Powertools version, as the API may still change before GA):
+The following is pseudocode: choose a maintained library for the runtime and decide explicitly whether state is local to one execution environment or shared across all invocations.
 
-```python
-from aws_lambda_powertools.utilities.circuit_breaker_alpha import circuit_breaker, CircuitBreakerError
+```text
+from your_resilience_library import circuit_breaker, CircuitBreakerOpen
 
 @circuit_breaker(failure_threshold=5, recovery_timeout=30)
 def call_downstream_service(payload):
@@ -226,14 +228,14 @@ def call_downstream_service(payload):
 def lambda_handler(event, context):
     try:
         return call_downstream_service(event)
-    except CircuitBreakerError:
+    except CircuitBreakerOpen:
         # Circuit is OPEN — return a fallback response instead of calling downstream
         return {"status": "degraded", "message": "Service temporarily unavailable"}
 ```
 
 ### When NOT to Use
 
-- Don't use for errors that won't recover (validation errors) — send to DLQ directly
+- Don't use for errors that won't recover (such as validation errors) — reject them or quarantine asynchronous events when investigation is required
 - Don't use with aggressive thresholds — risk of hiding real failures
 
 ---
@@ -246,10 +248,10 @@ Critical for at-least-once delivery systems to prevent duplicate processing.
 graph TB
     A[Incoming Request] --> B{Idempotency Key<br/>in Headers/Body}
     B -->|Present| C{Check DynamoDB<br/>Idempotency Table}
-    B -->|Absent| D[Process Normally]
+    B -->|Absent for mutating request| D[Reject or derive a stable business key]
     
     C -->|Found + COMPLETED| E[Return Cached Result]
-    C -->|Found + IN_PROGRESS| F[Wait & Retry<br/>Max 5 attempts]
+    C -->|Found + IN_PROGRESS| F[Bounded wait or return<br/>accepted/conflict]
     C -->|Not Found| G[Mark IN_PROGRESS<br/>Conditional Write]
     
     G -->|Success| H[Process Request]
@@ -279,7 +281,7 @@ DynamoDB table schema for tracking request state and caching responses.
 | `idempotency_key` | String (PK) | Unique request identifier |
 | `status` | String | IN_PROGRESS / COMPLETED / FAILED |
 | `response` | String (JSON) | Cached response for replay |
-| `created_at` | Number | Timestamp for TTL |
+| `created_at` | Number | Audit timestamp |
 | `expires_at` | Number | TTL for automatic cleanup |
 
 ### Idempotency Key Sources
@@ -289,9 +291,9 @@ Common places to derive an idempotency key from, depending on the trigger.
 | Source | Example | Use Case |
 |--------|---------|----------|
 | **Client-generated** | `X-Idempotency-Key: req-123` | API requests, client retries |
-| **Message ID** | `messageId` from SQS | Queue processing |
+| **Message ID** | `messageId` from SQS | Retries of the same SQS message; prefer a producer/business event ID when a message can be republished or redriven as a new message |
 | **Business key** | `orderId: ORD-001` | Domain-specific deduplication |
-| **Hash** | `SHA256(payload)` | Content-based deduplication |
+| **Hash** | `SHA256(canonical_payload + operation_scope)` | Content-based deduplication when the payload can be canonicalized and the collision/scope policy is explicit |
 
 ---
 
@@ -306,19 +308,19 @@ graph TB
     subgraph "Bulkhead: Payment Service"
         B -->|Reserved Concurrency: 50| C1[Lambda<br/>Payment Handler]
         C1 --> C2[(Payment DB)]
-        C1 --> C3[SQS DLQ<br/>payment-dlq]
+        C1 -->|Explicitly enqueue recoverable failure| C3[SQS failure queue<br/>payment-failures]
     end
     
     subgraph "Bulkhead: Inventory Service"
         B -->|Reserved Concurrency: 50| D1[Lambda<br/>Inventory Handler]
         D1 --> D2[(Inventory DB)]
-        D1 --> D3[SQS DLQ<br/>inventory-dlq]
+        D1 -->|Explicitly enqueue recoverable failure| D3[SQS failure queue<br/>inventory-failures]
     end
     
     subgraph "Bulkhead: Notification Service"
         B -->|Reserved Concurrency: 20| E1[Lambda<br/>Notification Handler]
         E1 --> E2[SES / SNS]
-        E1 --> E3[SQS DLQ<br/>notification-dq]
+        E1 -->|Explicitly enqueue recoverable failure| E3[SQS failure queue<br/>notification-failures]
     end
     
     subgraph "Unreserved Pool"
@@ -334,11 +336,11 @@ Lambda concurrency is a shared, account-level (and often stack-level) pool. With
 
 ### Concurrency Allocation Strategy
 
-Reserved concurrency budget per service, prioritized by business criticality.
+Illustrative reserved-concurrency budget per service, prioritized by business criticality. Reserved concurrency both reserves capacity for and caps a function; values remain subject to account concurrency and Lambda scaling behavior and must be load-tested.
 
 | Service | Priority | Reserved Concurrency | Rationale |
 |---------|----------|---------------------|-----------|
-| **Payment Processing** | Critical | 100 | Never starve, financial impact |
+| **Payment Processing** | Critical | 100 | Reserve capacity and cap blast radius for a financially sensitive path |
 | **Order Processing** | High | 50 | Core business logic |
 | **Notifications** | Medium | 20 | Important but not blocking |
 | **Analytics** | Low | 10 | Can tolerate delays |
@@ -446,15 +448,15 @@ Sample fault-injection experiments, the expected resilient behavior, and how to 
 
 | Experiment | Injection Method | Expected Behavior | Validation |
 |-----------|-----------------|------------------|------------|
-| **Lambda Timeout** | Reduce timeout to 1s | DLQ receives messages | DLQ depth increases |
-| **SQS Queue Full** | Stop consumer Lambda | Queue depth grows | No message loss |
-| **DynamoDB Throttling** | Reduce RCUs/WCUs | Retry logic activates | Requests eventually succeed |
-| **RDS Connection Limit** | Reduce RDS Proxy pool | Queue backs up | No connection errors leak |
-| **Region Failure** | Route 53 failover | Traffic shifts to secondary | Requires pre-warming, DNS TTL tuning |
+| **Lambda delay/error** | AWS FIS Lambda extension: `invocation-add-delay` or `invocation-error` | Retry/fallback activates | Errors, latency, and failure destination match the hypothesis |
+| **SQS consumer outage** | Stop the consumer Lambda within a controlled experiment | Queue depth and message age grow | No message loss and backlog drains after recovery |
+| **AWS API throttling** | AWS FIS `inject-api-throttle-error` scoped to a test IAM role and a supported service/API action | Retry budget activates | Backoff occurs without a retry storm |
+| **Database connection pressure** | Controlled load test in an isolated environment | Queue/load shedding activates | Borrow timeouts remain bounded and recovery is automatic |
+| **Regional recovery** | Execute the tested ARC Region switch or recovery runbook in a game day | Traffic and state move to the recovery Region | Measured RTO/RPO meet the target |
 
 ### AWS Fault Injection Simulator (FIS)
 
-AWS FIS is a managed service for running chaos experiments. Use it instead of manual injection for repeatable, auditable experiments with built-in safety controls (targets, stop conditions, tags).
+AWS FIS is a managed service for repeatable, auditable experiments with targets and CloudWatch-alarm stop conditions. Lambda actions require the AWS FIS managed extension as a layer plus per-Region S3 configuration; response-streaming functions are not supported by that extension.
 
 ---
 
@@ -463,39 +465,39 @@ AWS FIS is a managed service for running chaos experiments. Use it instead of ma
 ### Lambda Function Level
 
 - [ ] Set appropriate timeout (not default 3s)
-- [ ] Configure reserved concurrency
+- [ ] Assess reserved concurrency; configure it when a function needs an isolation guarantee or concurrency cap
 - [ ] Implement structured logging with correlation IDs
-- [ ] Add try-catch with specific error handling
-- [ ] Configure DLQ for async invocations
-- [ ] Use Powertools for structured logging and metrics
-- [ ] Implement idempotency for SQS/DynamoDB triggers
+- [ ] Use language-appropriate, specific error handling and preserve actionable context
+- [ ] Configure an on-failure destination or DLQ for async invocations that require failed-event retention
+- [ ] Consider Powertools for supported structured logging, metrics, tracing, and idempotency utilities
+- [ ] Implement idempotency for queue/stream consumers that perform side effects
 - [ ] Use `ReportBatchItemFailures` for partial batch failure reporting (SQS → Lambda)
 - [ ] Set environment-specific error thresholds
 
 ### Infrastructure Level
 
-- [ ] Multi-AZ deployment for all stateful services
-- [ ] DLQ on every SQS queue
+- [ ] Select and test Multi-AZ options for stateful services whose availability requirement needs them
+- [ ] Monitored DLQ for queues whose exhausted failures need isolation and redrive; assess ordering impact before attaching one to a FIFO workflow
 - [ ] CloudWatch Alarms on error rates
-- [ ] X-Ray tracing enabled
+- [ ] Enable supported tracing where it materially improves diagnosis
 - [ ] Log retention policies configured
 - [ ] Auto-scaling boundaries set (min/max)
-- [ ] VPC endpoints for critical AWS services
+- [ ] Assess VPC endpoints when private network paths, policy controls, or egress design require them
 - [ ] Backup and recovery tested
 
 ### Monitoring & Alerting
 
-Warning and critical thresholds for the key resilience metrics, with the recommended action at each level.
+Derive alarm thresholds from the workload SLO, error budget, traffic baseline, and downstream capacity rather than universal counts.
 
-| Metric | Warning | Critical | Action |
-|--------|---------|----------|--------|
-| Lambda Error Rate | >1% | >5% | Investigate logs |
-| Lambda Duration p99 | >70% timeout | >90% timeout | Optimize code |
-| SQS Queue Depth | >1000 | >10000 | Scale consumers |
-| DLQ Depth | >0 | >100 | Manual review |
-| Throttles | >10/min | >100/min | Increase concurrency |
-| Cold Starts | >20% | >50% | Provisioned concurrency |
-| DynamoDB IteratorAge | >300s | >900s | Scale stream consumers |
+| Signal | Derive the threshold from | Response |
+|--------|---------------------------|----------|
+| Lambda errors | Error budget and expected handled-error baseline | Correlate logs/traces with deployments and dependency health |
+| Lambda duration percentiles | End-to-end deadline and remaining timeout margin | Identify slow code/dependencies; tune timeout only after understanding the cause |
+| SQS message age and queue depth | Maximum acceptable processing latency and measured drain rate | Check consumer errors, concurrency caps, downstream capacity, and producer spikes |
+| DLQ visible messages | Failure-retention policy; often any new message warrants notification | Triage ownership and cause, then redrive only after the failure is safe to retry |
+| Lambda throttles and concurrency | Function/account quotas, reservations, and downstream safe throughput | Determine whether the constraint is intentional before changing concurrency |
+| Cold-start tail latency and provisioned-concurrency spillover | Latency SLO and traffic pattern | Optimize initialization; use provisioned concurrency or SnapStart only when supported and justified by measurements/cost |
+| DynamoDB/Kinesis `IteratorAge` | Event-freshness SLO and stream retention | Investigate processing failures, hot partitions, batch settings, and concurrency |
 
 ---
 
@@ -505,10 +507,23 @@ Common error-handling mistakes and the fix for each.
 
 | Anti-Pattern | Problem | Solution |
 |-------------|---------|----------|
-| **Swallowing exceptions** | Silent failures, data loss | Log all exceptions, use DLQ |
-| **Infinite retries** | Queue buildup, wasted cost | Set max retry attempts |
-| **No circuit breaker** | Cascading failures | Implement circuit breaker |
-| **Synchronous retries in hot path** | User-facing delays | Use async retry with SQS |
-| **Single DLQ for all services** | Hard to diagnose, mixed priorities | Per-service DLQs |
-| **No error classification** | Retry errors that won't fix | Classify 4xx vs 5xx |
-| **Ignoring cold start latency** | Poor user experience | Provisioned concurrency for critical paths |
+| **Swallowing exceptions** | Silent failures and data loss | Emit structured, sanitized diagnostics and propagate the error to the applicable failure route |
+| **Unbounded retries** | Queue buildup, retry storms, and wasted cost | Use a bounded, source-specific retry/redrive policy plus event-age or retention limits |
+| **No protection from a failing dependency** | Repeated calls can cascade into concurrency exhaustion | Use bounded timeouts/retries and add a circuit breaker when the dependency's failure mode can cascade |
+| **Unbounded synchronous retries in a hot path** | Exhausts the caller's deadline | Permit only a small, idempotent retry budget within the deadline; use async processing when a completed response is unnecessary |
+| **Unrelated workloads share one DLQ** | Mixed ownership, access, and recovery policy | Partition DLQs by owner, failure policy, and access boundary |
+| **No error classification** | Retries terminal errors or drops transient ones | Classify by the dependency's API contract; some 4xx responses such as 408, 409, or 429 can be retryable |
+| **Ignoring cold-start tail latency** | Can violate a latency SLO | Measure first; optimize initialization and consider supported SnapStart or provisioned concurrency when the SLO and cost justify it |
+
+## Authoritative References
+
+- [Lambda retry behavior](https://docs.aws.amazon.com/lambda/latest/dg/invocation-retries.html)
+- [Lambda asynchronous invocation error handling](https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-error-handling.html)
+- [Configuring SQS event source mappings](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html)
+- [Lambda DynamoDB event source mapping parameters](https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-params.html)
+- [Amazon SNS message delivery retries](https://docs.aws.amazon.com/sns/latest/dg/sns-message-delivery-retries.html)
+- [EventBridge retry policies and dead-letter queues](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-retry-policy.html)
+- [Step Functions handling errors with Retry and Catch](https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html)
+- [Lambda reserved concurrency](https://docs.aws.amazon.com/lambda/latest/dg/configuration-concurrency.html)
+- [AWS FIS Lambda actions](https://docs.aws.amazon.com/fis/latest/userguide/use-lambda-actions.html)
+- [AWS FIS actions reference](https://docs.aws.amazon.com/fis/latest/userguide/fis-actions-reference.html)

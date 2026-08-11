@@ -1,296 +1,190 @@
-# Lambda Best Practices
+# AWS Lambda Best Practices
+
+Design Lambda functions as short-lived, stateless compute units while taking advantage of safe execution-environment reuse. Delivery semantics, retries, and failure destinations depend on the invocation source; there is no single Lambda retry policy for every trigger.
 
 ## Function Design
 
-### Function Configuration
+| Concern | Best practice |
+|---|---|
+| Scope | Keep one function focused on a cohesive capability and event contract |
+| Handler | Keep orchestration thin; isolate business logic from Lambda-specific input/output for testing |
+| Idempotency | Make side effects safe under duplicate delivery and retries; persist an idempotency key atomically |
+| Initialization | Create SDK clients, database connections, and reusable assets outside the handler |
+| State | Treat memory and `/tmp` as a cache only; never require reuse for correctness or user isolation |
+| Configuration | Use environment variables for non-secret settings and a managed secret store for credentials |
+| Deployment | Publish immutable versions and route aliases to versions for production |
 
-| Setting | Recommendation | Reason |
-|---------|---------------|--------|
-| **Timeout** | Minimum needed (start at 3s); max 15 minutes | Reduces cost, faster failure feedback |
-| **Memory** | Right-size based on CPU needs; 128 MB-10,240 MB | Memory and CPU scale together |
-| **Ephemeral storage (/tmp)** | Right-size based on need; 512 MB default, up to 10,240 MB | Storage cost scales with size beyond free 512 MB |
-| **Concurrency** | Set reserved concurrency | Prevent resource contention |
-| **Provisioned Concurrency** | For low-latency requirements | Eliminates cold starts |
-| **SnapStart** | Enable for Java (Corretto), Python, and .NET cold-start-sensitive functions | Restores from a pre-initialized snapshot instead of a full cold init; free for Java, small restore charge for Python/.NET; not compatible with Provisioned Concurrency, EFS, or ephemeral storage > 512 MB |
-| **Architecture** | arm64 (Graviton) when possible | Better price/performance |
-| **Runtime** | Latest supported version | Security patches, performance |
+Initialize reusable resources outside the handler, contrary to the common but harmful advice to move initialization into the handler. Validate that reused connections remain alive, and never store per-user sensitive state where a later invocation can observe it.
 
-### Memory vs Performance
+## Configuration and Quotas
 
-| Memory (MB) | vCPU (approx) | Network Bandwidth | Use Case |
-|-------------|--------------|-------------------|----------|
-| 128 | 0.05 | Low | Simple event processing |
-| 256 | 0.1 | Low-Medium | API handlers, light processing |
-| 512 | 0.2 | Medium | Data transformation, DB calls |
-| 1024 | 0.4 | Medium-High | Heavy computation, ML inference |
-| 2048 | 0.8 | High | Image/video processing |
-| 3008 | 1.7 | Highest | Maximum performance functions |
-| 10240 | 6.0 | Highest | Batch processing, data pipelines |
+| Setting | Current service boundary / guidance |
+|---|---|
+| Timeout | Up to 900 seconds; load test and set enough margin for dependency latency and cleanup |
+| Memory | 128–10,240 MB in 1 MB increments; CPU scales with memory |
+| CPU | At 1,769 MB a function receives the equivalent of one vCPU; at maximum memory it can receive up to six vCPUs |
+| Ephemeral storage | 512–10,240 MB; storage above 512 MB is billed for invocation duration |
+| Architecture | Benchmark `arm64` and `x86_64` with the real dependencies; ensure native binaries support the target |
+| Concurrency | The default regional account quota is commonly 1,000 but can be lower for new accounts and is adjustable |
+| Environment variables | Aggregate limit is 4 KB; encryption does not make them an appropriate secret-distribution mechanism |
 
----
+- Use AWS Lambda Power Tuning or representative load tests to select memory from cost **and** latency, not rules of thumb.
+- Set reserved concurrency to reserve/cap capacity for critical functions or protect a downstream system. Reserving it unnecessarily reduces the shared unreserved pool.
+- Configure maximum concurrency on SQS event source mappings when the queue consumer must not overwhelm dependencies.
+- Confirm quotas in Service Quotas for every target Region before launch; do not assume the account default.
 
-## Cold Start Optimization
-
-### Cold Start Factors
-
-| Factor | Impact | Mitigation |
-|--------|--------|------------|
-| **Runtime** | Java/C# > Python/Node > Go/Rust | Use lighter runtimes |
-| **Memory** | Higher memory = faster init | Increase memory allocation |
-| **Package size** | Larger = slower deployment | Minimize dependencies |
-| **VPC attachment** | ENI creation adds latency | Use VPC endpoints, provisioned concurrency |
-| **Initialization code** | Long init = cold start | Move to handler, lazy load |
-
-### Mitigation Strategies
-
-| Strategy | Effectiveness | Cost Impact | Use Case |
-|----------|--------------|-------------|----------|
-| **Provisioned Concurrency** | Eliminates cold starts | Higher cost | Latency-critical paths |
-| **SnapStart** | Reduces cold start via snapshot restore (no provisioned instances kept warm) | Free for Java; small snapshot-restore charge for Python/.NET | Java, Python, .NET functions with slow init |
-| **Increase memory** | Faster initialization | Higher per-invocation cost | Moderate traffic |
-| **Smaller packages** | Faster deployment | No extra cost | All functions |
-| **VPC endpoints** | Faster VPC connectivity | Endpoint cost | VPC-attached functions |
-| **Keep-warm patterns** | Scheduled invocations | Extra invocations | Low-traffic functions |
-| **Runtime selection** | Go/Rust fastest init | No extra cost | New development |
+## Cold Starts and Execution Reuse
 
 ```mermaid
 flowchart TD
-    A[Cold Start Detected] --> B{Traffic Pattern?}
-    B -->|High / Latency-critical| C[Provisioned Concurrency]
-    B -->|Moderate| D{In VPC?}
-    B -->|Low / Sporadic| E{New or Existing?}
-    C --> F[Pre-warmed instances ready]
-    D -->|Yes| G[VPC Endpoints + Higher Memory]
-    D -->|No| H[Increase Memory Allocation]
-    G --> I[Faster ENI + more CPU]
-    H --> I
-    E -->|New| J[Choose Go / Rust runtime]
-    E -->|Existing| K[Scheduled keep-warm pings]
-    J --> L[Minimal init overhead]
-    K --> M[Reduced cold start frequency]
-    F --> N[(Optimized Latency)]
-    I --> N
-    L --> N
-    M --> N
+    A["Latency requirement"] --> B{"Strict pre-initialized\nlatency required?"}
+    B -->|Yes| PC["Provisioned Concurrency on an alias/version"]
+    B -->|No| C{"Supported runtime and\nSnapStart-compatible design?"}
+    C -->|Yes| SS["Evaluate SnapStart"]
+    C -->|No| O["Optimize initialization and package"]
+    PC --> M["Measure spillover and cost"]
+    SS --> M
+    O --> M
 ```
 
----
+| Technique | Important nuance |
+|---|---|
+| Execution reuse | Move clients/connections outside the handler and cache static assets in `/tmp` |
+| Package reduction | Include only runtime dependencies; measure impact instead of assuming size is the only cold-start factor |
+| Memory tuning | More memory adds CPU and can reduce initialization/duration, but benchmark total cost |
+| Provisioned Concurrency | Keeps a configured number of environments initialized; overflow beyond it can still cold start |
+| SnapStart | Available for supported Java, Python, and .NET managed runtimes on published versions; restore from a snapshot rather than keeping capacity provisioned |
 
-## Error Handling
+SnapStart is incompatible with Provisioned Concurrency, EFS, S3 Files, container images, and ephemeral storage above 512 MB. Initialization state is cloned, so reseed uniqueness, refresh credentials/connections, and use runtime hooks where needed. Availability, supported runtime versions, Regions, and pricing evolve; verify them before standardizing.
 
-### Retry Strategies
+VPC attachment is no longer accurately described as creating a new ENI for every cold start; Lambda uses Hyperplane ENIs. Put a function in a VPC only when it needs VPC resources. A VPC-connected function does not retain default internet access—provide NAT or appropriate VPC endpoints. Endpoints improve private connectivity and security, not cold-start initialization by themselves.
 
-| Service | Retry Behavior | Configuration |
-|---------|---------------|---------------|
-| **SQS** | Configurable retries (1-1000) | Redrive policy to DLQ |
-| **SNS** | Configurable (1-5 hours) | Retry policy |
-| **DynamoDB Streams** | Up to 7 days, exponential backoff | Bisect batch on error |
-| **Kinesis** | Up to 7 days, exponential backoff | Bisect batch on error |
-| **EventBridge** | Up to 24 hours / 185 attempts | Retry policy (configurable per target) |
-| **API Gateway** | No automatic retry | Application-level retry |
+Scheduled “keep warm” invocations are not a dependable cold-start guarantee and create noise/cost. Use Provisioned Concurrency when a guarantee is required.
 
-### Error Handling Patterns
+## Invocation and Retry Semantics
 
-| Pattern | Description | Implementation |
-|---------|-------------|----------------|
-| **Dead Letter Queue (DLQ)** | Capture failed events | SQS or SNS DLQ |
-| **Partial batch failure** | Report failed item IDs | Response with batchItemFailures |
-| **Circuit breaker** | Stop retrying failing downstream | Application logic |
-| **Idempotency** | Safe to retry | Deduplication keys, idempotency keys |
-| **Graceful degradation** | Fallback behavior | Default values, cached data |
+| Invocation path | Failure behavior |
+|---|---|
+| Synchronous (`RequestResponse`) | Lambda returns the error; the caller/source decides whether to retry |
+| Asynchronous (`Event`) | Lambda queues the event and by default retries function errors twice; maximum event age, retry attempts, destinations, and DLQ are configurable |
+| SQS event source mapping | Lambda polls; failed messages become visible after the queue visibility timeout and the queue redrive policy controls movement to its DLQ |
+| Kinesis/DynamoDB stream mapping | Failed batches can block a shard; configure partial failures, bisect, maximum record age/retries, and an on-failure destination as appropriate |
+| Kafka/MQ/document DB mappings | Source-specific polling, batching, and retry semantics apply; consult the trigger guide |
+
+An asynchronous Lambda DLQ/destination is different from an SQS source queue's DLQ and from an event source mapping's on-failure destination. Prefer destinations for asynchronous invocations when you need richer success/failure records and routing.
 
 ```mermaid
 flowchart TD
-    A[Event Received] --> B[Lambda Handler]
-    B --> C{Success?}
-    C -->|Yes| D[Process Complete]
-    C -->|Transient Error| E{Retry Attempts < Max?}
-    E -->|Yes| F[Exponential Backoff]
-    F --> B
-    E -->|No| G{DLQ Configured?}
-    G -->|Yes| H[Send to DLQ SQS/SNS]
-    G -->|No| I[Event Lost]
-    H --> J[DLQ Processor Lambda]
-    J --> K{Recoverable?}
-    K -->|Yes| L[Reprocess Event]
-    K -->|No| M[Log & Alert]
-    D --> N[(Done)]
-    L --> B
-    I --> O[(Data Loss)]
-    M --> N
+    E["Invocation source"] --> T{"Type?"}
+    T -->|Synchronous| C["Caller owns retry"]
+    T -->|Asynchronous| A["Lambda retry + destination/DLQ"]
+    T -->|SQS mapping| Q["Visibility timeout + queue redrive"]
+    T -->|Stream mapping| S["Shard retry controls + failure destination"]
+    C --> I["Idempotent handler"]
+    A --> I
+    Q --> I
+    S --> I
 ```
 
----
+- Use exponential backoff with jitter for retrying SDK calls and bound attempts by the remaining function time.
+- Apply circuit breaking/load shedding when retries would amplify a failing dependency.
+- Distinguish retriable errors from invalid/poison events and include enough metadata for safe remediation.
+- Never assume exactly-once execution. Use conditional writes, transactions, deduplication records, or an idempotency utility.
 
-## Performance Optimization
+## SQS Event Source Mappings
 
-### Invocation Types
+| Setting | Guidance |
+|---|---|
+| Batch size | Standard queues support up to 10,000 records; FIFO queues up to 10; payload size can reduce the actual record count |
+| Batch window | Standard queues only; if batch size exceeds 10, configure at least one second |
+| Visibility timeout | At least six times the function timeout, plus the batching window, per Lambda guidance |
+| Queue redrive | Configure a queue DLQ and set `maxReceiveCount` to at least 5 unless evidence supports another value |
+| Partial failures | Enable `ReportBatchItemFailures` and return only failed message identifiers |
+| Scaling | Use event-source maximum concurrency and reserved concurrency deliberately; preserve capacity for other functions |
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| **Synchronous** | Wait for response | API Gateway, direct invocation |
-| **Asynchronous** | Fire and forget | Event processing, background tasks |
-| **Event source mapping** | Polling-based (SQS, Kinesis, DynamoDB) | Stream processing |
-| **Stream batch** | Batch records processing | High-throughput processing |
-
-### Payload Optimization
-
-| Technique | Description | Impact |
-|-----------|-------------|--------|
-| **Compression** | gzip for large payloads | Reduced transfer time |
-| **Binary media types** | Register for binary data | Handle images, files |
-| **Streaming responses** | For large outputs | Reduced memory, faster start |
-| **Response pagination** | Split large responses | Smaller payloads |
-
-### Concurrency Management
-
-| Setting | Description | Recommendation |
-|---------|-------------|----------------|
-| **Account limit** | Default 1,000 per region | Request increase if needed |
-| **Reserved concurrency** | Dedicated capacity | Set for critical functions |
-| **Unreserved** | Shared pool | Non-critical functions |
-| **Provisioned concurrency** | Pre-initialized instances | Low-latency requirements |
-
----
+Delete/acknowledge behavior is controlled by the event source mapping. Do not manually delete each SQS message from a normally successful Lambda batch. For FIFO queues, stop processing after the first failure and report failed/unprocessed records to preserve ordering.
 
 ## Security
 
-### Execution Role
+| Control | Recommendation |
+|---|---|
+| Execution role | Grant only actions/resources the function needs; separate deployment permissions from runtime permissions |
+| Resource policy | Restrict who/services can invoke the function, including `SourceArn`/`SourceAccount` where supported |
+| Secrets | Use Secrets Manager or Parameter Store `SecureString`, cache with bounded lifetime, and rotate |
+| Environment variables | Store non-secret configuration; use a customer managed KMS key only when key-policy control is required |
+| VPC | Use for private dependencies, with least-privilege security groups and required NAT/endpoints |
+| Supply chain | Pin/scan dependencies, use trusted base images, and sign supported ZIP deployments when required |
+| Logs | Prevent credentials, tokens, and sensitive payloads from entering logs; set retention and access controls |
 
-| Permission | Required For | Least Privilege Approach |
-|------------|-------------|-------------------------|
-| **CloudWatch Logs** | Function logging | Specific log group ARN |
-| **S3** | Object access | Specific bucket and prefix |
-| **DynamoDB** | Table access | Specific table ARN |
-| **SQS** | Queue operations | Specific queue ARN |
-| **Secrets Manager** | Secret retrieval | Specific secret ARN |
-| **SSM Parameter Store** | Parameter access | Specific parameter path |
+Lambda code signing validates signed ZIP deployment packages from trusted AWS Signer profiles; it does not apply to container-image functions. Scan both application packages and layers, and patch shared layers/runtimes promptly.
 
-### Security Best Practices
+## Packaging and Deployment
 
-| Control | Implementation |
-|---------|---------------|
-| **Least privilege IAM** | Specific resource ARNs, not wildcards |
-| **Environment variables** | Use SSM Parameters for secrets |
-| **VPC placement** | Private subnets for DB access |
-| **VPC endpoints** | Private service access |
-| **DLQ encryption** | KMS encryption on SQS DLQ |
-| **Logging** | Enable CloudWatch Logs with retention |
-| **Tracing** | Enable X-Ray for debugging |
-| **Code signing** | Verify code integrity |
+| Package | Limits and guidance |
+|---|---|
+| ZIP archive | Direct API/console upload is limited to 50 MB zipped; the unzipped function plus layers and custom runtime is limited to 250 MB |
+| Layers | Up to five layers per function; they count toward the 250 MB unzipped total |
+| Container image | Up to 10 GB uncompressed; image must be in an Amazon ECR repository in the same Region |
 
----
+- Use infrastructure as code (SAM, CDK, CloudFormation, or another controlled tool) and deploy immutable versions.
+- Shift an alias gradually with CodeDeploy/SAM and alarms that stop/roll back a deployment.
+- Layers can reduce duplication but create dependency/version coupling; do not update consumers implicitly.
+- Container images are not automatically better for cold starts. Keep them minimal, pin by digest/version, and scan ECR.
+- Set runtime-management policy deliberately and track runtime deprecation dates.
 
-## Cost Optimization
+## Observability
 
-| Strategy | Description | Potential Savings |
-|----------|-------------|-------------------|
-| **Right-size memory** | Match to actual CPU needs | 20-50% |
-| **Right-size timeout** | Minimum needed duration | Proportional reduction |
-| **Graviton (arm64)** | Better price/performance | 20% |
-| **Provisioned wisely** | Only for latency-critical functions | Avoid unnecessary provisioned |
-| **Batch processing** | Process multiple records per invocation | Lower per-record cost |
-| **Smart retry** | Avoid unnecessary retries | Reduce invocation count |
-| **Remove unused functions** | Clean up orphaned functions | Eliminate costs |
+Emit structured logs with service/function name, version, cold-start indicator, request/event ID, correlation ID, and business outcome. Use Embedded Metric Format or Powertools where appropriate to avoid high-cardinality custom metric dimensions.
 
-### Cost Calculation
+| Signal | What it reveals |
+|---|---|
+| `Errors` / `Invocations` | Function error rate |
+| `Duration` | Tail latency and proximity to timeout |
+| `Throttles` | Account/function concurrency pressure |
+| `ConcurrentExecutions` / `ClaimedAccountConcurrency` | Capacity consumption and reservation pressure |
+| `ProvisionedConcurrencySpilloverInvocations` | Traffic exceeding provisioned capacity |
+| `AsyncEventAge` / `AsyncEventsDropped` | Backlog or expiry for asynchronous invocation |
+| `IteratorAge` | Lag for stream event source mappings |
+| SQS `ApproximateAgeOfOldestMessageVisible` | Queue backlog age; this is an SQS metric, not a Lambda metric |
+| Destination/DLQ metrics | Terminal delivery failures and remediation backlog |
 
-| Component | Pricing | Example (256 MB, 1s) |
-|-----------|---------|---------------------|
-| **Invocations** | $0.20 per 1M | $0.00000020 per invocation |
-| **Duration** | $0.0000166667 per GB-second | $0.00000427 per invocation (256 MB, 1s) |
-| **Total per invocation** | Invocations + Duration | ~$0.00000447 (256 MB, 1s) |
-| **1M invocations** | Total (256 MB, 1s avg) | ~$4.47 |
-> **Note:** Prices are us-east-1 standard; arm64 is ~20% cheaper. |
+`Init Duration` appears in platform logs and telemetry but is not a standard Lambda CloudWatch metric named `InitDuration`. Use logs, Lambda Insights, or telemetry tooling for cold-start analysis. Build thresholds from SLOs and dependency limits rather than universal percentages.
 
----
+- Use tracing selectively and propagate trace/correlation context across asynchronous boundaries.
+- Alarm on error-budget burn, throttles, oldest-event age, destination failures, and concurrency saturation.
+- Set explicit log retention; default infinite retention can become both a cost and data-governance problem.
+- Monitor recursive loops and set reserved concurrency to zero as an emergency circuit breaker when needed.
 
-## Deployment
+## Cost and Performance
 
-### Deployment Strategies
+Lambda cost can include requests, duration, memory architecture, ephemeral storage, Provisioned Concurrency, SnapStart for applicable runtimes, streaming, logs, data transfer, and connected services. Prices and free tiers vary.
 
-| Method | Description | Use Case |
-|--------|-------------|----------|
-| **AWS SAM** | Serverless application model | Infrastructure as code |
-| **Serverless Framework** | Cross-cloud serverless | Multi-cloud deployments |
-| **CDK** | Infrastructure as code (programming) | Complex applications |
-| **Container image** | Docker-based deployment | Large dependencies, custom runtime |
-| **Lambda Layers** | Shared code and dependencies | Code reuse across functions |
-
-### Lambda Layers
-
-| Consideration | Recommendation |
-|---------------|----------------|
-| **Size limit** | 50 MB unzipped (application), 250 MB total |
-| **Versioning** | Version layers for rollback capability |
-| **Runtime compatibility** | Match runtime and architecture |
-| **Shared code** | Put common libraries in layers |
-| **Updates** | Update layers independently from functions |
-
----
-
-## Monitoring
-
-### Key Metrics
-
-| Metric | Warning | Critical | Description |
-|--------|---------|----------|-------------|
-| **Errors** | > 1% of invocations | > 5% of invocations | Failed invocations |
-| **Duration (p99)** | > 80% of timeout | > 95% of timeout | Slow invocations |
-| **Throttles** | > 0 | > 10/min | Concurrency limits |
-| **Init Duration** | > 500ms | > 2s | Cold start impact |
-| **IteratorAge** | > 1 hour | > 6 hours | Stream processing lag |
-| **AgeOfOldestRecord** | > 1 hour | > 6 hours | Event freshness |
-
-### Logging Best Practices
-
-| Practice | Description |
-|----------|-------------|
-| **Structured logging** | JSON format for parsing |
-| **Correlation IDs** | Trace requests across services |
-| **Log retention** | Set appropriate retention period |
-| **Log groups** | One per function, tagged |
-| **Metrics filters** | Custom metrics from log patterns |
-
----
-
-## Event Sources
-
-### Supported Triggers
-
-| Trigger | Batch Size | Buffering | Use Case |
-|---------|-----------|-----------|----------|
-| **API Gateway** | 1 request | None | HTTP endpoints |
-| **S3** | 1 MB max | None | Object processing |
-| **SQS** | Up to 10,000 | Configurable | Message processing |
-| **DynamoDB Streams** | Up to 10,000 | 0-15 min | Change data capture |
-| **Kinesis Data Streams** | Up to 10,000 | 0-15 min | Stream processing |
-| **EventBridge** | 1 event | None | Event-driven workflows |
-| **SNS** | 1 message | None | Fan-out processing |
-| **EventBridge (CloudWatch Events)** | 1 event | None | Scheduled, event-driven |
-| **AppSync** | 1 request | None | GraphQL resolvers |
-
-### SQS Batch Processing
-
-| Setting | Recommendation | Reason |
-|---------|---------------|--------|
-| **Batch size** | 10-100 items | Balance throughput and error handling |
-| **Batch window** | 5-10 seconds | Accumulate items efficiently |
-| **Maximum retry attempts** | 3-5 | Balance retries and DLQ |
-| **Visibility timeout** | 2x function timeout + buffer | Prevent duplicate processing |
-| **DLQ** | Always configure | Capture permanent failures |
-
----
+- Optimize at representative load: increasing memory can lower duration enough to reduce total cost.
+- Batch records where latency and failure isolation permit.
+- Use Compute Savings Plans for eligible steady Lambda duration/Provisioned Concurrency usage when commitment is justified.
+- Remove unused function versions and layer versions; they consume regional code storage even when not invoked.
+- Compare Lambda with container/batch services for long-running, constantly busy, GPU, specialized networking, or highly stateful workloads.
 
 ## Lambda with Step Functions
 
-| Consideration | Recommendation | Reason |
-|---------------|---------------|--------|
-| **When to orchestrate** | Multi-step workflows, branching, human approval, long-running processes (> 15 min) | Lambda alone can't wait beyond its own timeout or resume after a pause |
-| **Integration pattern** | Prefer direct service integrations (e.g., DynamoDB, SNS, SQS) over a Lambda task where no custom logic is needed | Removes cold starts, invocation cost, and an extra failure point |
-| **Payload size** | Keep state passed between steps small (< 256 KB) | Large payloads should go through S3/DynamoDB with a reference passed in state |
-| **Error handling** | Use `Retry`/`Catch` in the state machine instead of custom retry loops inside the function | Centralizes backoff and failure routing, easier to observe per step |
-| **Express vs. Standard workflows** | Express for high-volume, short-duration (< 5 min) Lambda-driven workflows; Standard for long-running, auditable workflows | Express is cheaper per-execution but lacks full execution history |
-| **Idempotency** | Design Lambda tasks to be safely retried by the state machine | Standard workflows retry steps on transient failures |
+| Decision | Recommendation |
+|---|---|
+| Orchestration | Use Step Functions for multi-step workflows, branching, waits, human approval, and recovery state |
+| Service integrations | Call AWS services directly from the state machine when custom Lambda logic adds no value |
+| Payload | Keep state below the workflow quota; put large data in S3/DynamoDB and pass a reference |
+| Error handling | Centralize workflow-level `Retry`/`Catch`; keep function-internal retries bounded to transient downstream calls |
+| Workflow type | Standard for durable, auditable, long-running execution; Express for high-volume, short-duration work after evaluating its execution semantics |
+| Tasks | Make every Lambda task idempotent because a state can be retried |
 
-See [Event-Driven Architecture Patterns](../Design/01-event-driven-patterns.md) for broader workflow orchestration patterns.
+## Authoritative References
+
+- [Lambda best practices](https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html)
+- [Lambda quotas](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html)
+- [Lambda concurrency](https://docs.aws.amazon.com/lambda/latest/dg/lambda-concurrency.html)
+- [Lambda SnapStart](https://docs.aws.amazon.com/lambda/latest/dg/snapstart.html)
+- [Lambda retry behavior](https://docs.aws.amazon.com/lambda/latest/dg/invocation-retries.html)
+- [Asynchronous error handling](https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-error-handling.html)
+- [SQS event source configuration](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html)
+- [Lambda VPC networking](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html)
+- [Lambda metrics](https://docs.aws.amazon.com/lambda/latest/dg/monitoring-metrics-types.html)
+- [Lambda pricing](https://aws.amazon.com/lambda/pricing/)

@@ -1,300 +1,186 @@
-# EventBridge Best Practices
+# Amazon EventBridge Best Practices
 
-## Architecture
+Amazon EventBridge routes events; it is not a durable work queue for consumers. Design producers and targets for at-least-once delivery, duplicates, retries, delayed delivery, and partial failure.
 
-### EventBus Types
+## Select the Right EventBridge Capability
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| **Default Event Bus** | Receives events from AWS services | Standard event processing |
-| **Custom Event Bus** | User-created, isolated | Application-specific events |
-| **Partner Event Bus** | SaaS partner events | Third-party integration |
-| **Archive** | Store events for replay | Debugging, compliance |
-| **Replay** | Re-process archived events | Recovery, testing |
+| Capability | Use it for | Key characteristic |
+|---|---|---|
+| Event bus + rules | Many-to-many event routing and fan-out | Rules match events and deliver independently to targets |
+| Archive and replay | Retaining bus events and replaying them later | Replay is asynchronous and sends events back through the source event bus |
+| Pipes | Point-to-point integration from a supported source to one target | Managed polling, filtering, batching, optional enrichment, transformation, and delivery |
+| Scheduler | One-time or recurring invocations | Time zones, daylight-saving behavior, flexible windows, retries, DLQ, and broad AWS API target support |
+| Schema Registry | Discovering/cataloging schemas and generating code bindings | Registry does **not** validate events as they are published or delivered |
 
-### Event Routing
-
-| Component | Description | Direction |
-|-----------|-------------|-----------|
-| **Event Source** | Produces events | Inbound to bus |
-| **Event Bus** | Routes events | Central hub |
-| **Rule** | Matches and routes events | Pattern matching |
-| **Target** | Receives routed events | Outbound from bus |
+The default event bus receives supported AWS service events. Use custom buses to create ownership, policy, encryption, and operational boundaries for application domains. Partner event sources are associated with partner event buses.
 
 ```mermaid
 flowchart LR
-    subgraph Sources["Event Sources"]
-        S1[AWS Services]
-        S2[Custom Apps]
-        S3[SaaS Partners]
-        S4[Scheduled Rules]
-    end
-
-    subgraph EventBus["Event Bus"]
-        EB[Event Bus]
-    end
-
-    subgraph Rules["Event Rules"]
-        R1[Rule 1\nPattern Match]
-        R2[Rule 2\nPattern Match]
-        R3[Rule N\nPattern Match]
-    end
-
-    subgraph Targets["Targets"]
-        T1[Lambda]
-        T2[SQS]
-        T3[SNS]
-        T4[Step Functions]
-        T5[Kinesis]
-    end
-
-    S1 --> EB
-    S2 --> EB
-    S3 --> EB
-    S4 --> EB
-    EB --> R1
-    EB --> R2
-    EB --> R3
-    R1 --> T1
-    R2 --> T2
-    R3 --> T3
-    R1 --> T4
-    R2 --> T5
+    P1["AWS services"] --> D["Default bus"]
+    P2["Applications"] --> C["Custom domain bus"]
+    P3["SaaS partner"] --> PB["Partner bus"]
+    D --> R1["Precise rules"]
+    C --> R1
+    PB --> R1
+    R1 --> T1["Lambda"]
+    R1 --> T2["SQS"]
+    R1 --> T3["Step Functions"]
+    C --> AR["Archive"]
+    AR -. replay .-> C
 ```
 
----
+## Event Contracts
+
+Custom events should follow the EventBridge envelope and put domain data under `detail`.
+
+| Field | Guidance |
+|---|---|
+| `source` | Stable, owned namespace such as `com.example.orders` |
+| `detail-type` | Business fact in past tense, such as `Order Accepted` |
+| `detail` | Minimal event data and stable identifiers; do not put secrets in events |
+| Version | Version the business schema in `detail` or via an explicit contract strategy |
+| Correlation | Include correlation/causation IDs and a stable event/business ID |
+| Time | Preserve the time the fact occurred when it differs from publication time |
+
+- Publish facts, not commands disguised as events, when multiple consumers may react independently.
+- Define compatibility rules. Prefer additive optional fields; consumers should ignore unknown fields.
+- Put large or sensitive payloads in an appropriate data store and send an authorized reference, accounting for consistency and expiry.
+- Treat delivery as at least once. Make consumers idempotent with a business key or event ID and an atomic state transition.
+- Give producers ownership of schema documentation and deprecation; do not rely on discovery as governance.
 
 ## Event Pattern Design
 
-### Pattern Matching
+Event patterns are structural JSON filters. Values are arrays; omitted fields are ignored. String matching is exact and case-sensitive unless an operator such as `equals-ignore-case` is used. Numeric equality without the numeric operator is based on JSON string representation.
 
-| Field | Operators | Description |
-|-------|-----------|-------------|
-| account | =, != | AWS account ID |
-| time | =, !=, >, <, >=, <= | Event timestamp |
-| region | =, != | AWS region |
-| source | =, !=, begins-with | Event source |
-| detail-type | =, !=, begins-with | Event type |
-| resources | =, !=, begins-with | Resource ARNs |
-| detail | =, !=, >, <, exists | Custom event data |
+| Operator/pattern | Use |
+|---|---|
+| Exact values | Known `source`, `detail-type`, account, Region, state, or identifier |
+| `anything-but` | Exclude known values |
+| `prefix`, `suffix`, `wildcard` | String patterns; wildcard support and complexity rules differ for buses and Pipes |
+| `numeric` | Numeric ranges and comparisons |
+| `exists` | Presence/absence of a leaf field |
+| `cidr` | IP network matching |
+| `$or` | Alternatives across multiple fields |
 
-### Event Design Guidelines
+- Always constrain `source` and `detail-type`; for CloudTrail-delivered events also constrain `detail.eventSource` and `detail.eventName`.
+- Avoid duplicate JSON keys. EventBridge uses only the final duplicate and behavior can be surprising.
+- Test patterns with the EventBridge Sandbox or `TestEventPattern`, including non-matching and future-compatible samples.
+- Prevent loops by ensuring a rule cannot match events produced by its own target, or by adding a source/status guard.
+- Use input transformers for simple projection and templating, not business logic or security validation.
 
-| Guideline | Description | Example |
-|-----------|-------------|---------|
-| **Consistent format** | Standardize event structure | id, source, time, type, detail |
-| **Include correlation ID** | Trace across services | UUID in detail |
-| **Version events** | Handle schema changes | version field in detail |
-| **Minimal data** | Only necessary fields | Avoid large payloads |
-| **Idempotent targets** | Safe to replay | Deduplication logic |
-| **Meaningful detail-type** | Easy filtering | "Order Created", "User Updated" |
+## Rules, Delivery, and Failure Handling
 
----
+Each rule target has its own role/permissions, retry policy, and optional DLQ. A match is not proof of successful target delivery.
 
-## Rules
+| Setting | Guidance |
+|---|---|
+| Retry policy | Default is up to 24 hours and 185 attempts with exponential backoff and jitter; reduce age/attempts only when stale events are harmful |
+| DLQ | Configure for targets where dropping an undelivered event is unacceptable |
+| Target role | Grant only the action and resource needed by that target |
+| Target input | Pass the original event when audit/context matters; transform only to a documented target contract |
+| Fan-out | Prefer separate targets/rules when retry, transformation, ownership, or failure isolation differs |
 
-### Rule Configuration
+EventBridge target DLQs use **standard SQS queues**, not FIFO queues, and the queue must be in the same Region as the rule. Configure the queue resource policy so EventBridge can send messages. A DLQ captures events EventBridge could not deliver to the target after retries, including certain non-retriable failures; it does not capture an event after the target successfully accepts it and later fails internally.
 
-| Setting | Recommendation | Reason |
-|---------|---------------|--------|
-| **Rule name** | Descriptive, prefixed by domain | Easy identification |
-| **Event pattern** | Specific enough to avoid noise | Reduce unnecessary processing |
-| **Schedule** | Cron or rate for periodic events | Scheduled tasks |
-| **Target retry** | Default 24 hours / up to 185 attempts (configurable, max 24 hours) | Retry window |
-| **Dead-letter queue** | Always configure | Capture permanent failures |
-| **Input transformer** | Transform before target | Reduce target complexity |
+```mermaid
+flowchart TD
+    E["Matched event"] --> I["Invoke target"]
+    I -->|successfully accepted| S["Delivery success"]
+    I -->|retriable failure| R{"Retry age/attempts remain?"}
+    R -->|yes| I
+    R -->|no| Q{"DLQ configured?"}
+    I -->|non-retriable delivery failure| Q
+    Q -->|yes| D["Standard SQS DLQ"]
+    Q -->|no| X["Event dropped"]
+```
 
-### Rule Types
+- Alarm on DLQ depth and build a controlled redrive process that preserves idempotency.
+- If durable buffering/backpressure is required, route to SQS and let consumers process from the queue.
+- Archive critical domain events when replay is a valid recovery tool. Set retention from recovery/compliance needs and test replay against non-production consumers first.
+- Replay preserves event contents but changes delivery context; consumers must recognize duplicates and should be safe against replaying old side effects.
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| **Event pattern** | Match incoming events | Event-driven processing |
-| **Schedule (rate)** | Fixed interval | Periodic tasks |
-| **Schedule (cron)** | Cron expression | Complex schedules |
+## Cross-Account and Security
 
----
+- Restrict custom event-bus resource policies by organization, account, principal, source, and action as narrowly as possible.
+- For cross-account routing, configure both the destination bus policy and the sender's IAM permissions. Costs are charged according to the current cross-account pricing model.
+- Use dedicated IAM roles for targets and Pipes. Do not reuse broad application roles.
+- EventBridge encrypts data at rest by default. Use a customer managed KMS key only when key-policy control and audit requirements justify its operational dependencies.
+- Keep credentials for API Destinations in EventBridge Connections/Secrets Manager and rotate them; do not include credentials in event payloads.
+- Use CloudTrail for control-plane and supported data-event auditing, and protect archives, DLQs, and log targets with appropriate encryption and access policies.
 
-## Targets
+## EventBridge Pipes
 
-### Supported Targets
-
-| Target | Description | Configuration |
-|--------|-------------|---------------|
-| **Lambda** | Invoke function | Function ARN, qualifier |
-| **SQS** | Send message | Queue ARN, group ID (FIFO) |
-| **SNS** | Publish notification | Topic ARN |
-| **Step Functions** | Start state machine | State machine ARN |
-| **EC2** | Run instances | Instance IDs |
-| **Kinesis** | Put record | Stream ARN |
-| **CodeBuild** | Start build | Project name |
-| **Grafana** | Send metric | Workspace ID |
-
-### Target Configuration
-
-| Setting | Recommendation |
-|---------|---------------|
-| **Retry policy** | Use default (24 hours / 185 attempts) or tune MaximumEventAgeInSeconds and MaximumRetryAttempts |
-| **Dead-letter queue** | Always configure SQS DLQ |
-| **Input path** | Transform event before sending |
-| **Input transformer** | Extract specific fields |
-| **HttpParameters** | For API destinations |
-
----
-
-## Error Handling
-
-### Retry Behavior
-
-| Target | Retry Duration | Backoff | Notes |
-|--------|---------------|---------|-------|
-| Lambda | Up to 24 hours / 185 attempts | Exponential | Configurable DLQ |
-| SQS | Up to 24 hours / 185 attempts | Exponential | Queue handles retries |
-| SNS | Up to 24 hours / 185 attempts | Exponential | Subscribers handle retries |
-| Step Functions | Up to 24 hours / 185 attempts | Exponential | Execution handles retries |
-| Kinesis | Up to 24 hours / 185 attempts | Exponential | Stream handles retries |
-> **Note:** 24 hours / 185 attempts is the maximum configurable retry policy on a rule target (default matches the maximum); can be reduced per target. |
-
-### Dead-Letter Queue
-
-| Setting | Recommendation |
-|---------|---------------|
-| **Always configure DLQ** | For all rules with Lambda targets |
-| **DLQ retention** | Match compliance requirements |
-| **DLQ monitoring** | Alert on messages in DLQ |
-| **DLQ processing** | Lambda to process DLQ messages |
-
----
-
-## Schema Registry
-
-### Event Schema Management
-
-| Feature | Description | Use Case |
-|---------|-------------|----------|
-| **Schema discovery** | Auto-discover event schemas | Event catalog |
-| **Schema registry** | Store and version schemas | Schema governance |
-| **Code generation** | Generate SDK code | Type-safe event handling |
-| **Schema validation** | Validate events against schema | Data quality |
-
----
-
-## Pipes
-
-### EventBridge Pipes
-
-EventBridge Pipes is a point-to-point integration service for connecting a single source (SQS, Kinesis, DynamoDB Streams, MSK, Amazon MQ) to a single target, with optional filtering, enrichment, and transformation in between. It is distinct from event bus rules, which fan out matched events to multiple targets.
-
-| Component | Description |
-|-----------|-------------|
-| **Source** | Poller-based source (SQS, Kinesis, DynamoDB Streams, MSK, Amazon MQ) |
-| **Filtering** | Drop events before processing (no cost for filtered-out events) |
-| **Enrichment** | Add data (Lambda, Step Functions, API Destinations, API Gateway) |
-| **Target** | Any EventBridge-supported target |
-| **Parameters** | Configuration |
+Pipes are for one source-to-one-target flows. Supported sources include SQS, Kinesis Data Streams, DynamoDB Streams, Amazon MSK, self-managed Apache Kafka, and Amazon MQ; consult the current documentation because source/target options evolve.
 
 ```mermaid
 flowchart LR
-    A[Source\nSQS/Kinesis/DynamoDB Streams] --> B[Filter]
-    B --> C[Enrichment\nLambda/Step Functions/API Destination]
-    C --> D[Target]
-    D --> F1[Lambda]
-    D --> F2[SQS]
-    D --> F3[SNS]
-    D --> F4[Step Functions]
-    D --> F5[Kinesis]
+    S["Supported source"] --> F["Filter"]
+    F --> B["Batch and transform"]
+    B --> E["Optional enrichment"]
+    E --> T["One target"]
+    T -->|delivery failure| DLQ["DLQ / failure destination\nwhen supported"]
 ```
 
-### Pipes Use Cases
+- Filter before enrichment to avoid unnecessary calls. Filtered SQS messages are deleted; filtered stream records are skipped, so validate filters carefully.
+- Tune batch size/window from the target payload limit and per-record processing cost.
+- Enrichment is synchronous in the pipe path; bound latency and failure behavior.
+- Understand source-specific retry semantics. SQS visibility/redrive differs from ordered stream retry/record-age behavior.
+- Configure partial batch failure where the source/target combination supports it and make targets idempotent.
+- Monitor pipe state: persistent authorization/configuration failures can cause a pipe to stop or become disabled.
 
-| Use Case | Components | Description |
-|----------|-----------|-------------|
-| **Data enrichment** | Source + Enrichment + Target | Add context to events |
-| **Format transformation** | Source + Filter + Target | Convert event format |
-| **Filtering** | Source + Filter + Target | Filter events before target |
-| **Point-to-point streaming** | Source + Target | Move stream records to a target without writing custom polling code |
+## EventBridge Scheduler
 
----
+Scheduled rules are a legacy capability. Prefer EventBridge Scheduler for new schedules.
 
-## Scheduler
+| Setting | Recommendation |
+|---|---|
+| Time expression | Use `at` for one-time work and `rate`/`cron` for recurring work |
+| Time zone/DST | Choose an IANA time zone deliberately and test daylight-saving behavior |
+| Flexible window | Use it to smooth load when exact invocation time is unnecessary |
+| Retry and DLQ | Configure maximum event age/attempts and a standard SQS DLQ based on business expiry |
+| One-time cleanup | Set `ActionAfterCompletion=DELETE`; completed schedules otherwise count toward quota |
+| Idempotency | The target must tolerate duplicate invocations |
+| Execution role | Scope to the one target API/resource required |
 
-### EventBridge Scheduler
-
-EventBridge Scheduler is a dedicated scheduling service, separate from schedule-based rules on an event bus. Prefer it over scheduled rules for most new scheduling needs.
-
-| Feature | Description |
-|---------|-------------|
-| **Scale** | Supports far more schedules per account/Region than the ~300 rule limit per event bus |
-| **One-time schedules** | Native support, with automatic cleanup after invocation (`ActionAfterCompletion`) |
-| **Recurring schedules** | Cron or rate expressions, with time zone and daylight-saving support |
-| **Targets** | 270+ AWS API actions via universal targets, in addition to common targets (Lambda, SQS, Step Functions) |
-| **Flexible time windows** | Spread invocations over a window to smooth load |
-| **Retry/DLQ** | Configurable retry policy and dead-letter queue per schedule |
-
-| When to Use | Recommendation |
-|-------------|---------------|
-| **High volume of schedules** | EventBridge Scheduler (avoids per-bus rule limits) |
-| **One-time future task** | EventBridge Scheduler |
-| **Simple periodic rule tied to existing bus rules** | Scheduled (cron/rate) rule on event bus |
-
----
+Check Scheduler quotas for schedules and invocation throughput in each Region. Spread large fleets with flexible windows and request quota increases before migration.
 
 ## Monitoring
 
-### Key Metrics
+Use `AWS/Events` metrics with the correct `EventBusName` and `RuleName` dimensions.
 
-| Metric | Description | Alert Threshold |
-|--------|-------------|----------------|
-| IncomingEvents | Events received by bus | Sudden drop/spike |
-| FailedEvents | Events that failed delivery | > 0 sustained |
-| DeletedEvents | Events deleted from archive | Monitor for cleanup |
-| ReplayedEvents | Events from replay | During replay operations |
-| PublishedEvents | Events sent to targets | Match incoming events |
-| MatchedEvents | Events matching rules | Validate rule patterns |
+| Metric | Meaning/action |
+|---|---|
+| `MatchedEvents` | Events matched by a bus/rule; compare with expected producer volume |
+| `InvocationAttempts` | Target delivery attempts, including first attempts and retries |
+| `SuccessfulInvocationAttempts` | Successfully delivered target invocations |
+| `RetryInvocationAttempts` | Early warning for throttled or unhealthy targets |
+| `FailedInvocations` | Permanent failures after retry handling; alarm when nonzero |
+| `InvocationsSentToDlq` | Events sent to the configured DLQ |
+| `InvocationsFailedToBeSentToDlq` | DLQ permissions, availability, or size failure; high severity |
+| `IngestionToInvocationSuccessLatency` | End-to-end delivery latency including retries |
 
-### Best Practices
+Metrics are best effort, so use target metrics, DLQ inspection, CloudTrail, and business reconciliation for complete operational assurance. EventBridge does not provide end-to-end application tracing automatically; propagate correlation IDs and instrument producers/consumers.
 
-| Practice | Description |
-|----------|-------------|
-| **Monitor DLQ** | Alert on messages in dead-letter queues |
-| **Track latency** | Time from event to target processing |
-| **Archive critical events** | For debugging and compliance |
-| **Use X-Ray** | For distributed tracing |
-| **CloudWatch Logs** | For rule evaluation logs |
+## Cost Management
 
----
+Charges vary among custom/partner events, cross-account delivery, archives/replay, Pipes, Scheduler, API Destinations, and targets. Current pricing and free tiers change.
 
-## Cost Optimization
+- Make patterns precise to reduce unnecessary target work and avoid loops.
+- Set archive retention intentionally and delete obsolete archives/replays.
+- Filter Pipes before enrichment and target invocation.
+- Use batching where supported, without exceeding target payload limits or latency requirements.
+- Evaluate total cost: EventBridge delivery plus Lambda, SQS, logs, data transfer, enrichment, and downstream calls.
 
-| Strategy | Description | Potential Savings |
-|----------|-------------|-------------------|
-| **Specific event patterns** | Reduce unnecessary rule matches | Lower target invocations |
-| **Right-size archives** | Set retention period | Storage cost reduction |
-| **Custom buses** | Isolate high-volume events | Better cost tracking |
-| **Input transformers** | Reduce payload to targets | Lower target costs |
-| **Batch targets** | SQS batching | Fewer target invocations |
+## Authoritative References
 
-### Pricing
-
-| Component | Price |
-|-----------|-------|
-| **Events put** | $1.00 per 1M events |
-| **Events matched** | $1.00 per 1M events |
-| **Archive storage** | $0.50 per GB-month |
-| **Replay** | $1.00 per 1M events |
-| **Schema registry** | $1.00 per 1M API calls |
-| **Pipes** | $0.40 per 1M events processed (cheaper than event bus for point-to-point) |
-| **Scheduler** | $1.00 per 1M invocations (first 14M/month free) |
-
----
-
-## Cross-Service Integration
-
-| Service | Integration | Purpose |
-|---------|------------|---------|
-| Lambda | Primary target | Event processing |
-| SQS | Decoupled processing | Reliable message delivery |
-| SNS | Fan-out notifications | Multiple subscribers |
-| Step Functions | Workflow orchestration | Complex workflows |
-| S3 | Event source | Object change events |
-| Kinesis | Stream processing | Real-time data |
-| CodePipeline | CI/CD triggers | Automated deployments |
+- [EventBridge events and event buses](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-events.html)
+- [Event pattern syntax and operators](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-create-pattern.html)
+- [Event pattern best practices](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-patterns-best-practices.html)
+- [EventBridge target retry policy](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-retry-policy.html)
+- [EventBridge dead-letter queues](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-dlq.html)
+- [EventBridge monitoring and metrics](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-monitoring.html)
+- [EventBridge Pipes](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-pipes.html)
+- [What is EventBridge Scheduler?](https://docs.aws.amazon.com/scheduler/latest/UserGuide/what-is-scheduler.html)
+- [EventBridge Scheduler quotas](https://docs.aws.amazon.com/scheduler/latest/UserGuide/scheduler-quotas.html)
+- [EventBridge quotas](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-quota.html)
+- [EventBridge pricing](https://aws.amazon.com/eventbridge/pricing/)

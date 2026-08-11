@@ -28,7 +28,7 @@ graph LR
 
 ### Why This Pattern?
 
-Serving static assets (images, JS/CSS bundles, video, downloads) directly from S3 means every request — regardless of where the user is — travels to a single regional bucket, and every byte is billed as S3 data transfer. At any real scale that produces high tail latency for distant users and turns popular objects into a repeated read load on the bucket. CloudFront terminates requests at an edge location close to the user and serves cached objects from there, so the origin only sees traffic on cache misses (effectively once per object per edge location, not once per user).
+Serving static assets directly from S3 means every request travels to the bucket's Region and generates origin request/transfer usage. CloudFront serves cache hits near viewers, so the origin sees misses, revalidations, and expired/evicted-object fetches rather than every viewer request. Actual fetch frequency depends on TTLs, cache keys, eviction, and optional Origin Shield—not a guaranteed one fetch per object and edge location.
 
 **Trade-off:** adding CloudFront means every static asset now has two possible states (edge cache vs. origin) that can disagree, and cache invalidation is neither instant nor free — `CreateInvalidation` requests are rate-limited, cost money past the free tier, and take time to propagate globally. For assets that change infrequently and can be versioned by filename, this is a non-issue; for a bucket serving content that mutates in place, the cache becomes a source of stale-data bugs unless invalidation is built into the deploy process.
 
@@ -63,15 +63,15 @@ graph LR
 
 Dynamic endpoints behind an ALB or API Gateway pay TLS handshake and TCP connection-setup cost on every new client connection, and each request travels the full path back to the region regardless of how close the user is. At volume this shows up as elevated p99 latency for geographically distant clients and as connection-handling overhead on the origin. Putting CloudFront in front — even with caching disabled for most paths — lets the edge terminate TLS and reuse persistent connections to the origin, and lets the subset of responses that are cacheable (a product catalog page, a computed leaderboard) be served without touching the application at all.
 
-**Trade-off:** dynamic caching only pays off if the cache key is engineered correctly — every header, cookie, and query string forwarded to the origin becomes part of what CloudFront must consider for a "cache hit," and forwarding too much (e.g., a session cookie) collapses the hit ratio to near zero while forwarding too little (missing a locale header) serves the wrong content to the wrong user. This tuning work is ongoing as the API evolves, not a one-time setup cost.
+**Trade-off:** dynamic caching only pays off if the cache key is engineered correctly. Headers, cookies, and query strings included by the cache policy fragment the cache; omit a value that changes the response and CloudFront can serve the wrong content to a user. An origin request policy can forward additional origin-required values without adding them to the cache key, but do that only when those values truly do not vary the response. This tuning work is ongoing as the API evolves, not a one-time setup cost.
 
 Key decisions for caching dynamic, per-request content without leaking data between users.
 
 | Decision | Guidance |
 |---|---|
 | Cache policy | Separate cache behaviors per path pattern; short/no TTL for personalized responses |
-| Origin request policy | Forward only headers/cookies/query strings the origin needs — improves cache hit ratio |
-| Field-level | Use CloudFront Functions to normalize headers before they hit cache key |
+| Origin request policy | Forward origin-required headers/cookies/query strings that are intentionally excluded from the cache key; verify they do not change the response |
+| Request normalization | Use CloudFront Functions for lightweight URI/header/cookie normalization before cache lookup; include every variant that changes the response |
 
 ### When NOT to Use
 
@@ -124,9 +124,9 @@ graph LR
 
 ### Why This Pattern?
 
-DynamoDB already serves single-digit-millisecond reads, but that latency floor is a hard limit for use cases like real-time bidding, session lookups in a request hot path, or fan-out reads that each add a few milliseconds — millisecond-level latency adds up when a single user request triggers dozens of table reads. DAX closes that gap by caching item and query results in memory at microsecond latency, and because it's API-compatible with the DynamoDB SDK it removes the item cache without an application-level cache-aside rewrite. It also absorbs repeated reads of hot items so they don't consume DynamoDB read capacity (and cost) on every call.
+DynamoDB provides single-digit-millisecond performance for common operations, while DAX can return repeated eventually consistent reads from its item or query caches in microseconds. The DAX client supports a broad DynamoDB-compatible API surface, so applications can add a managed write-through cache without implementing cache-aside logic. Cache misses and strongly consistent/transactional reads still go to DynamoDB.
 
-**Trade-off:** DAX is another cluster to provision, patch (via maintenance windows), and pay for continuously, and it only helps if reads genuinely repeat — a workload dominated by unique, one-off reads or heavy writes gets none of the caching benefit while still paying for the cluster and absorbing the extra network hop if it isn't co-located with compute. It also introduces eventual consistency on cached reads even when the underlying table read was requested as strongly consistent, which matters for correctness-sensitive paths.
+**Trade-off:** DAX is another cluster to provision and pay for continuously, and it helps only when reads repeat. Cached item/query reads are eventually consistent; when `ConsistentRead=true`, DAX passes the request to DynamoDB and does not cache the response. Writes that bypass DAX can leave cached items stale until TTL/eviction, and item writes do not invalidate DAX query-cache result sets.
 
 Key decisions when placing DAX in front of a DynamoDB table.
 
@@ -134,7 +134,7 @@ Key decisions when placing DAX in front of a DynamoDB table.
 |---|---|
 | Write-through | Writes via DAX populate the cache automatically |
 | TTL | Item cache and query cache have independent TTLs |
-| Placement | Deploy in same VPC/AZ as compute to avoid added network hop cost |
+| Placement and HA | Place clients in the same VPC and deploy at least three DAX nodes across AZs for production HA |
 
 ### When NOT to Use
 
@@ -149,19 +149,19 @@ Which edge compute option fits a given use case.
 
 ### Why This Pattern?
 
-Some request-time logic — redirecting based on country, rewriting a header, routing an A/B test bucket — doesn't need the origin at all, but without an edge compute option every one of those decisions still requires a round trip to the application, adding latency and load for work that's really just string manipulation. CloudFront Functions and Lambda@Edge push that logic to the edge (or regional edge cache) so it executes closer to the user and never touches the origin, and they let teams change routing/redirect/header behavior without a full application deploy.
+Some request-time logic—redirecting based on country, rewriting a header, or assigning an A/B bucket—doesn't need application compute. CloudFront Functions and Lambda@Edge can execute that logic during viewer/origin request or response events, close to the viewer. A function can answer at the edge or transform a request before CloudFront continues to the cache/origin; edge execution does not imply that every request avoids the origin.
 
-**Trade-off:** edge compute runs in a constrained execution environment — no persistent connections to a database, tight memory/CPU/duration limits (tighter for CloudFront Functions than Lambda@Edge), and deployment/rollback that's slower than a normal Lambda update since changes propagate globally. Business logic that needs to call another service or read from a database doesn't belong at the edge; using Lambda@Edge for that turns a latency optimization into a distributed-debugging problem.
+**Trade-off:** edge compute runs under product-specific restrictions. CloudFront Functions cannot make network calls and have the tightest execution limits. Lambda@Edge can make network calls but cannot attach to your VPC and does not support features such as environment variables, layers, DLQs, X-Ray, provisioned concurrency, or container images. Globally distributed code is harder to observe and roll back, so keep edge logic small and latency-bounded.
 
 | Use Case | Choose |
 |---|---|
 | Sub-millisecond, simple logic (header manipulation, redirects, A/B routing) | CloudFront Functions (JavaScript, runs at all edge locations) |
-| Complex logic, network/external calls, larger runtime needs | Lambda@Edge (Node.js/Python, runs at regional edge caches) |
+| More complex logic or carefully bounded network calls | Lambda@Edge (Node.js/Python; function version created in `us-east-1`, runs at regional edge locations) |
 
 ### When NOT to Use
 
 - Don't use Lambda@Edge for simple header rewrites — CloudFront Functions are cheaper and lower-latency
-- Don't perform origin-fetching business logic at the edge — keep that in the origin application
+- Avoid database-dependent or unbounded origin-fetching business logic at the edge; every network call adds distributed latency and failure modes
 
 ---
 
@@ -176,3 +176,13 @@ Common caching and content-delivery mistakes and the fix for each.
 | **Treating cache as source of truth** | Data loss on cache eviction/flush | Always back caches with a durable store |
 | **Invalidating CloudFront on every deploy** | Slow, costly, cache-miss storm | Use versioned object keys instead of invalidation |
 | **No cache metrics** | Can't tell if cache is helping | Monitor hit/miss ratio (CloudWatch `CacheHitRate`, ElastiCache `CacheHits`/`CacheMisses`) |
+
+---
+
+## Authoritative References
+
+- [Restrict access to an Amazon S3 origin with CloudFront Origin Access Control](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)
+- [Understand cache policies](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/controlling-the-cache-key.html)
+- [DAX and DynamoDB consistency models](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DAX.consistency.html)
+- [Restrictions on Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge-function-restrictions.html)
+- [Restrictions on CloudFront Functions](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-function-restrictions.html)

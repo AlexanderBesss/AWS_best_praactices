@@ -6,7 +6,7 @@
 
 | Pattern | Description | Use Case |
 |---------|-------------|----------|
-| **Single-Table Design** | All related data in one table | Maximize throughput, simplify queries |
+| **Single-Table Design** | Co-locate related entity items around explicitly modeled access patterns | Reduce request fan-out and support transactional/item-collection access; it is not automatically best for every workload |
 | **Normalized Design** | Separate tables with references | Independent scaling, clear boundaries |
 | **Denormalized Design** | Duplicate data to avoid joins | Read-heavy, reduce query complexity |
 | **Aggregate Pattern** | Collection of items under one PK | User profile with multiple attributes |
@@ -40,8 +40,8 @@ graph TB
 
 | Key Type | Purpose | Constraints | Best Practice |
 |----------|---------|-------------|---------------|
-| **Partition Key (HK)** | Determines partition placement | Max 2048 bytes | High-cardinality, evenly distributed |
-| **Sort Key (RK)** | Orders items within partition | Max 2048 bytes | Enables range queries, filtering |
+| **Partition key** | Determines logical item collection and physical distribution | 1-2,048 bytes | High-cardinality, evenly distributed access |
+| **Sort key** | Orders items within a partition-key value | 1-1,024 bytes | Enables range and begins-with key conditions |
 | **Composite Key** | HK + RK combination | Both required for queries | Design for query patterns first |
 
 ### Partition Key Selection
@@ -61,22 +61,23 @@ graph TB
 
 | Feature | On-Demand | Provisioned |
 |---------|-----------|-------------|
-| **Pricing** | Per-request (~$0.125/million read request units, ~$0.625/million write request units, us-east-1) | Per-hour capacity + overage |
-| **Scaling** | Automatic, unlimited | Manual or auto-scaling |
+| **Pricing** | Per read/write request unit actually consumed | Provisioned RCU/WCU-hours; requests above available capacity can be throttled rather than billed as "overage" |
+| **Scaling** | Automatic within table/account quotas and warm-throughput behavior | Manual, scheduled, or Application Auto Scaling |
 | **Burst** | No burst needed | Burst from unused capacity |
 | **Predictability** | Variable cost | Predictable cost |
 | **Best For** | Unpredictable, spiky workloads | Steady, predictable workloads |
-| **Cost Break-even** | — | ~70% of provisioned capacity utilized |
+| **Cost comparison** | Often attractive for new, unpredictable, or spiky traffic | Often attractive for steady, forecastable traffic; calculate with actual item sizes, consistency, peaks, headroom, and current Regional rates |
+
+> On-demand tables instantly support previously reached traffic and up to twice the previous peak. A jump beyond twice the previous peak within 30 minutes can throttle; pre-warm or ramp traffic gradually. Configurable maximum throughput and account/table quotas can also cap traffic.
 
 ### Auto Scaling
 
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
-| **Min Capacity** | 1.2x baseline load | Headroom for normal variation |
-| **Max Capacity** | 3-5x peak load | Handle traffic spikes |
-| **Target Utilization** | 60-70% | Balance cost and performance |
-| **Scale-out cooldown** | 60 seconds | Prevent rapid scaling |
-| **Scale-in cooldown** | 300 seconds | Allow traffic to settle |
+| **Min Capacity** | Cover the normal trough and known scale-out delay | Avoid throttling before Application Auto Scaling reacts |
+| **Max Capacity** | Cover tested peak plus operational headroom and account quotas | Bound cost without blocking legitimate peak traffic |
+| **Target Utilization** | Start from the console default of 70%, then tune with load tests | Lower targets provide more burst headroom at higher idle cost |
+| **Scheduled scaling** | Pre-scale known peaks | Target tracking is reactive and cannot absorb every abrupt spike |
 | **Scaling policy** | Target tracking | Simple, effective |
 
 ---
@@ -87,7 +88,7 @@ graph TB
 
 | Consideration | Recommendation |
 |---------------|----------------|
-| **Number of GSIs** | Start with 2-3, add as needed (default quota: 20 per table) |
+| **Number of GSIs** | Add only for defined access patterns; default quota is 20 per table and can be adjustable |
 | **Number of LSIs** | Max 5 per table, must be defined at table creation |
 | **Sparse indexes** | Only index items that need the query pattern |
 | **Projected attributes** | Use `INCLUDE` or `KEYS_ONLY` to reduce cost |
@@ -110,30 +111,30 @@ graph TB
 
 | Technique | Description | Impact |
 |-----------|-------------|--------|
-| **BatchGetItem** | Fetch up to 100 items or 16 MB | Reduce request count |
+| **BatchGetItem** | Fetch up to 100 items or 16 MB per call | Reduce network round trips; retry `UnprocessedKeys` with exponential backoff |
 | **Parallel requests** | Multiple concurrent Gets | Higher aggregate throughput |
-| **DAX (DynamoDB Accelerator)** | In-memory caching | 10x read performance, lower cost |
-| **ProjectionExpression** | Fetch only needed attributes | Lower latency, lower cost |
+| **DAX (DynamoDB Accelerator)** | Write-through and item/query caches for compatible eventually consistent reads | Microsecond cache hits; validate operation, consistency, and Region support |
+| **ProjectionExpression** | Return only needed attributes | Can reduce response payload, but does not reduce read capacity consumed because billing uses item size before projection |
 | **Consistent reads** | Only when necessary | Eventually consistent is cheaper/faster |
 
 ### Write Optimization
 
 | Technique | Description | Impact |
 |-----------|-------------|--------|
-| **BatchWriteItem** | Write up to 25 items per batch | Reduce request count |
+| **BatchWriteItem** | Put/delete up to 25 items per call | Reduce round trips; it is not transactional and callers must retry `UnprocessedItems` |
 | **TransactWriteItems** | Atomic multi-item writes | Consistency across items |
 | **Parallel writes** | Different partition keys | Higher aggregate throughput |
 | **Time-to-Live (TTL)** | Auto-expire items | Reduce storage cost |
-| **PutItem vs UpdateItem** | Put for new, Update for partial | Wasted WCU on full replaces |
+| **PutItem vs UpdateItem** | Choose for semantics and conditional-write needs | `UpdateItem` does not inherently save WCUs: write capacity is based on the larger item size before or after the update |
 
 ### Hot Partition Avoidance
 
 | Symptom | Cause | Solution |
 |---------|-------|----------|
 | `ProvisionedThroughputExceededException` | Single partition overload | Redesign partition key |
-| High latency on specific queries | Hot sort key values | Add random suffix, use DAX |
+| High latency/throttling for one item collection | Skewed partition-key access | Write-shard the partition key where the access pattern can query/aggregate shards; a sort-key suffix alone does not distribute writes |
 | Uneven capacity usage | Skewed data distribution | Use UUID, hash prefix |
-| Write throttling on specific items | Hot item writes | Use UpdateItem with counters |
+| Write throttling on a specific item | Hot item updates | Use sharded counters, aggregation, buffering, or a different write model; `UpdateItem` alone does not remove a hot key |
 
 ---
 
@@ -144,9 +145,9 @@ graph TB
 | Feature | Description |
 |---------|-------------|
 | **In-memory caching** | Sub-millisecond read latency |
-| **Automatic cache invalidation** | Writes update cache automatically |
+| **Cache coherence** | Writes made through DAX update its item cache; writes made directly to DynamoDB can remain cached until TTL expiry |
 | **Cluster mode** | Multi-node for high availability |
-| **Supported operations** | GetItem, BatchGetItem, Query |
+| **Supported operations** | Cacheable reads: `GetItem`, `BatchGetItem`, `Query`, and `Scan`. DAX also supports documented write-through and transactional APIs, but passes strongly consistent and transactional reads through to DynamoDB |
 | **TTL** | Configurable per-item cache duration |
 
 ### DAX Sizing
@@ -169,9 +170,8 @@ graph TB
 | Feature | Description |
 |---------|-------------|
 | **Encryption at rest** | AWS-managed or KMS key |
-| **Encryption in transit** | TLS/SSL required |
-| **Pipelining** | Supported with encryption |
-| **DAX encryption** | At rest with KMS |
+| **Encryption in transit** | Use HTTPS/TLS for DynamoDB API calls; require TLS on clients and endpoints |
+| **DAX encryption** | Configure encryption at rest and in transit when the cluster is created; these settings cannot be enabled later on an existing cluster |
 
 ### Access Control
 
@@ -179,17 +179,17 @@ graph TB
 |---------|-------------|
 | **IAM Policies** | Fine-grained table, index, and attribute-level access |
 | **Resource-level permissions** | Specific table and GSI ARNs |
-| **Condition keys** | ddb:Attributes, ddb:MaxCapacity |
-| **VPC endpoints** | PrivateLink for DynamoDB |
+| **Condition keys** | `dynamodb:Attributes`, `dynamodb:LeadingKeys`, `dynamodb:Select`, and other documented keys |
+| **VPC endpoints** | Use a DynamoDB gateway endpoint for private routing from a VPC; apply endpoint and IAM policies together |
 
 ### IAM Policy Conditions
 
 | Condition Key | Description |
 |--------------|-------------|
-| `ddb:Attributes` | Restrict to specific attributes |
-| `ddb:MaxCapacity` | Limit batch operation size |
-| `ddb:LeadingKeys` | Restrict to specific partition keys |
-| `ddb:requestOperation` | Restrict to specific operations |
+| `dynamodb:Attributes` | Restrict attributes that a request can access; pair with `dynamodb:Select` as documented |
+| `dynamodb:LeadingKeys` | Restrict partition-key values for fine-grained access |
+| `dynamodb:Select` | Restrict result-selection behavior |
+| `dynamodb:ReturnConsumedCapacity` | Control whether callers request consumed-capacity details |
 
 ---
 
@@ -221,12 +221,12 @@ graph TB
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
 | **Switch to On-Demand** | For unpredictable workloads | Eliminate over-provisioning |
-| **Right-size provisioned** | Match to actual usage | 20-50% |
+| **Right-size provisioned** | Match capacity and auto-scaling settings to actual usage | Workload-dependent |
 | **Reduce GSIs** | Remove unused indexes | Per-GB storage + WCU cost |
 | **TTL for expiring data** | Auto-delete old items | Storage reduction |
 | **Projection optimization** | KEYS_ONLY or INCLUDE | GSI storage reduction |
-| **DAX for read-heavy** | Cache frequent reads | Lower RCU consumption |
-| **Standard-IA table class** | Use for tables where storage is the dominant cost | Up to ~60% lower storage cost (higher per-request cost) |
+| **DAX for read-heavy** | Cache compatible eventually consistent reads | Can reduce reads reaching DynamoDB; include DAX node/cluster cost and cache-miss traffic in the model |
+| **Standard-IA table class** | Use where storage cost dominates request cost | Lower storage price and higher read/write price; calculate against current Regional pricing |
 | **Archive to S3** | Export cold/infrequently accessed data (S3 export or on-demand backup export) | Storage cost reduction |
 
 ### Table Classes
@@ -234,19 +234,11 @@ graph TB
 | Table Class | Storage Cost | Throughput Cost | Best For |
 |-------------|-------------|------------------|----------|
 | **DynamoDB Standard** | Higher | Lower | Default; most workloads |
-| **DynamoDB Standard-IA** | Lower (~60% less) | Higher (~25% more) | Storage-dominant, infrequently accessed tables (logs, historical records) |
+| **DynamoDB Standard-IA** | Lower | Higher | Storage-dominant, infrequently accessed tables; evaluate current price ratios by Region |
 
 ### Cost Components
 
-| Component | On-Demand Cost (us-east-1) | Provisioned Cost |
-|-----------|---------------|-----------------|
-| **Read (per million request units)** | ~$0.125 (eventually consistent) | Billed per provisioned RCU-hour |
-| **Write (per million request units)** | ~$0.625 | Billed per provisioned WCU-hour |
-| **Storage (per GB/month)** | ~$0.25 (Standard table class) | Same |
-| **GSI storage (per GB/month)** | Same as base table storage rate | Same |
-| **Data transfer (per GB)** | Standard AWS data transfer rates apply | Same |
-
-> Pricing varies by region and changes periodically — always confirm current rates on the [DynamoDB pricing page](https://aws.amazon.com/dynamodb/pricing).
+Model table and GSI read/write units, table-class storage, backup/PITR storage, Streams reads, change-data capture, exports/imports, global-table replicated writes and replica storage, DAX, and applicable data transfer. Prices and free-tier treatment vary; confirm the deployment Region on the [DynamoDB pricing page](https://aws.amazon.com/dynamodb/pricing/).
 
 ---
 
@@ -255,9 +247,8 @@ graph TB
 | Method | RPO | RTO | Cost | Use Case |
 |--------|-----|-----|------|----------|
 | **On-Demand Backup** | Point-in-time | Minutes | Storage only | Manual snapshots, retained until explicitly deleted |
-| **Continuous Backup** | Configurable, 1-35 days (default 35) | Minutes | Included | Point-in-time recovery window |
-| **PITR** | ~5 minutes before current time | Minutes | Included | Precise recovery to any second within the configured window |
-| **DynamoDB Global Tables** | Near-zero | Seconds | 2x storage + transfer | Multi-region active-active |
+| **Continuous backup / PITR** | Restore to any second in a configured 1-35 day recovery period; latest restorable time is typically about five minutes behind current time | Workload- and table-size-dependent restore to a new table | Charged by continuous-backup storage; verify current pricing | Operational recovery from accidental writes/deletes |
+| **DynamoDB Global Tables** | Depends on consistency mode and application routing | Application/failover dependent | Replicated writes and storage in replica Regions; DynamoDB does not charge cross-Region transfer for global-table replication | Multi-Region, multi-active design |
 
 ---
 
@@ -268,10 +259,10 @@ graph TB
 | Feature | Description |
 |---------|-------------|
 | **Active-Active** | Read/write in all regions |
-| **Conflict resolution** | Last-writer-wins (LWW) |
-| **Replication latency** | Typically < 1 second |
-| **Auto-scaling** | Independent per region |
-| **Capacity mode** | Independent per region |
+| **Consistency modes** | Multi-Region eventual consistency (MREC, default) or multi-Region strong consistency (MRSC, selected at creation and subject to topology/feature constraints) |
+| **Conflict resolution** | MREC and multi-account global tables use asynchronous replication with last-writer-wins; MRSC provides strongly consistent multi-Region operations |
+| **Replication latency** | Monitor `ReplicationLatency`; do not encode a sub-second assumption into correctness or RPO calculations |
+| **Capacity configuration** | Billing mode and replica/index configuration are coordinated as a global table; provisioned auto scaling is managed across replicas rather than as unrelated tables |
 
 ```mermaid
 graph LR
@@ -288,8 +279,8 @@ graph LR
       S2["DynamoDB Stream"]
       T2 --> S2
     end
-    S1 == "Kinesis Replication" ==> T2
-    S2 == "Kinesis Replication" ==> T1
+    T1 == "DynamoDB-managed replication" ==> T2
+    T2 == "DynamoDB-managed replication" ==> T1
     style T1 fill:#2563eb,color:#fff
     style T2 fill:#2563eb,color:#fff
     style S1 fill:#d97706,color:#fff
@@ -301,10 +292,10 @@ graph LR
 | Consideration | Recommendation |
 |---------------|----------------|
 | **Write conflicts** | Design to minimize cross-region writes to same item |
-| **Eventual consistency** | Cross-region reads are eventually consistent |
+| **Consistency** | MREC cross-Region replication is eventual; use MRSC only when its stronger semantics and topology constraints fit the workload |
 | **Cost** | Data replicated to all regions |
-| **TTL** | Must be consistent across regions |
-| **Streams** | Not available on global tables |
+| **TTL** | MREC TTL settings synchronize across replicas; MRSC global tables do not support TTL |
+| **Streams** | DynamoDB Streams can be enabled on global-table replicas; consumers must handle replicated changes and possible duplicate processing |
 
 ---
 
@@ -314,11 +305,22 @@ graph LR
 
 | Metric | Warning | Critical |
 |--------|---------|----------|
-| `ConsumedReadCapacity` | > 70% of provisioned | > 90% of provisioned |
-| `ConsumedWriteCapacity` | > 70% of provisioned | > 90% of provisioned |
-| `ReadThrottleEvents` | > 0 | > 10/min |
-| `WriteThrottleEvents` | > 0 | > 10/min |
-| `AccountMaxReadCapacityUtilization` | > 70% | > 90% |
-| `AccountMaxWriteCapacityUtilization` | > 70% | > 90% |
-| `Latency` (ms) | > 10ms | > 50ms |
-| `SuccessfulRequestLatency` | > 20ms p99 | > 100ms p99 |
+| `ConsumedReadCapacityUnits` | Trend against provisioned/maximum throughput and forecast headroom | Sustained risk to workload SLO or configured limit |
+| `ConsumedWriteCapacityUnits` | Trend against provisioned/maximum throughput and forecast headroom | Sustained risk to workload SLO or configured limit |
+| `ReadThrottleEvents` | Any unexpected event | Sustained throttling or SLO impact |
+| `WriteThrottleEvents` | Any unexpected event | Sustained throttling or SLO impact |
+| `AccountMaxReadCapacityUtilization` | Trend toward account quota | Forecast or current quota exhaustion risk |
+| `AccountMaxWriteCapacityUtilization` | Trend toward account quota | Forecast or current quota exhaustion risk |
+| `SuccessfulRequestLatency` | Deviation from operation-specific baseline | Breach of the application latency SLO; this service metric excludes client/network time |
+
+---
+
+## Authoritative references
+
+- [DynamoDB constraints](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Constraints.html)
+- [DynamoDB on-demand capacity mode](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/on-demand-capacity-mode.html)
+- [Projection expressions and read capacity](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ProjectionExpressions.html)
+- [How DynamoDB Accelerator works](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DAX.concepts.html)
+- [Point-in-time recovery](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html)
+- [DynamoDB global tables](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GlobalTables.html)
+- [Fine-grained access control](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/specifying-conditions.html)

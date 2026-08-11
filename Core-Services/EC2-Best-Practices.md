@@ -18,17 +18,17 @@
 | Topic | Guidance |
 |-------|----------|
 | **AWS Graviton (arm64)** | Prefer Graviton-based instances (e.g., `m7g`, `c7g`, `r7g`, `t4g`) for supported workloads — typically better price-performance than equivalent `x86` instances; requires arm64-compatible AMIs/binaries |
-| **AWS Nitro System** | Virtually all current-generation instances run on the Nitro hypervisor, providing dedicated Nitro Cards for networking/storage/security, minimal virtualization overhead, and hardware-enforced isolation |
+| **AWS Nitro System** | Many current-generation instance families use the Nitro System. Verify the selected instance type; Nitro offloads networking, storage, management, and security functions to dedicated hardware and a lightweight hypervisor |
 | **Nitro Enclaves** | Use for isolated, attestable compute environments to process highly sensitive data (e.g., PII, keys) |
 
 ### Right-Sizing Guidelines
 
 | Step | Action | Tool |
 |------|--------|------|
-| 1 | Review CPU, memory, network utilization over 14-30 days | CloudWatch Metrics |
-| 2 | Identify over-provisioned instances (utilization < 25%) | Compute Optimizer |
-| 3 | Identify under-provisioned instances (utilization > 80%) | CloudWatch Alarms |
-| 4 | Test candidate instance types in non-production | AWS Instance Calculator |
+| 1 | Review a representative period that includes peaks and business cycles | CloudWatch metrics and application telemetry |
+| 2 | Review over- and under-provisioning recommendations | AWS Compute Optimizer |
+| 3 | Validate CPU, memory, network, EBS, latency, and queue-depth constraints against workload SLOs | CloudWatch alarms and load tests |
+| 4 | Test candidate instance types in non-production and model cost | AWS Pricing Calculator |
 | 5 | Migrate using AMI copy or stop/start with new type | AWS Console / CLI |
 
 ---
@@ -39,8 +39,8 @@
 |--------|-----------|----------|-------------|----------|
 | **On-Demand** | None | 0% | Full — stop, terminate, change anytime | Short-term, unpredictable workloads |
 | **Savings Plans (Compute)** | 1 or 3 years | Up to 66% | High — instance family, region, OS, tenancy flexible; covers EC2, Fargate, Lambda | Steady-state, predictable usage |
-| **Savings Plans (EC2 Instance)** | 1 or 3 years | Up to 72% | Low — specific instance family/region | Predictable, specific instance needs |
-| **Reserved Instances (Standard)** | 1 or 3 years | Up to 72% | Low — specific instance type/region/tenancy | Long-running, fixed instance types |
+| **Savings Plans (EC2 Instance)** | 1 or 3 years | Up to 72% | Medium — fixed instance family/Region, but size, OS, and tenancy can change | Predictable usage within a family and Region |
+| **Reserved Instances (Standard)** | 1 or 3 years | Up to 72% | Low — matching attributes; Regional Linux/Unix shared-tenancy RIs have size/AZ flexibility, while Zonal RIs reserve capacity | Long-running, well-understood EC2 usage |
 | **Reserved Instances (Convertible)** | 1 or 3 years | Up to 66% | Medium — modify instance attributes | Long-term with potential changes |
 | **Spot Instances** | None | Up to 90% | Low — can be interrupted | Fault-tolerant, flexible timing |
 
@@ -70,8 +70,8 @@ flowchart TD
     C --> M[Maximum discount up to 90%]
     F --> N[No commitment, full flexibility]
     G --> N
-    I --> O[Up to 72% discount, family flexible]
-    K --> P[Up to 62% discount, modifiable]
+    I --> O[Up to 66% discount, broad flexibility]
+    K --> P[Up to 66% discount, exchangeable]
     L --> Q[Up to 72% discount, fixed attributes]
 ```
 
@@ -83,8 +83,8 @@ flowchart TD
 
 | Setting | Value | Description |
 |---------|-------|-------------|
-| IMDS Version | **v2 only** | v1 is vulnerable to SSRF attacks |
-| Hop Limit | `1` | Prevents access from within containers |
+| IMDS Version | **v2 only** | Require session-oriented IMDSv2 as defense in depth against several metadata-access attack paths |
+| Hop Limit | `1` for direct host access; commonly `2` for containers | A limit of `1` can break container access. Use the smallest value that supports the workload and block metadata access for containers that do not need it |
 | Token Requirement | **Required** | IMDSv2 requires session token |
 
 ### Security Checklist
@@ -117,18 +117,17 @@ flowchart TD
 
 | Volume Type | Code | IOPS | Throughput | Use Case |
 |-------------|------|------|------------|----------|
-| **gp3** | `gp3` | Up to 16,000 (independent) | Up to 1,000 MB/s | General purpose, default choice |
-| **gp2** | `gp2` | Up to 16,000 (size-dependent) | Up to 250 MB/s | Legacy, migrate to gp3 |
-| **io2 Block Express** | `io2` | Up to 256,000 | Up to 4,000 MB/s | Mission-critical, low-latency |
-| **io2** | `io2` | Up to 64,000 | Up to 1,000 MB/s | Critical databases |
-| **st1** | `st1` | Up to 500 | Up to 500 MB/s | Throughput-optimized, big data |
-| **sc1** | `sc1` | Up to 125 | Up to 500 MB/s | Cold, infrequently accessed data |
+| **gp3** | `gp3` | Up to 80,000 (independently provisioned) | Up to 2,000 MiB/s | General-purpose SSD; limits depend on the attached instance and Region |
+| **gp2** | `gp2` | Up to 16,000 (size-dependent) | Up to 250 MiB/s | Previous general-purpose generation; evaluate migration to gp3 |
+| **io2 Block Express** | `io2` | Up to 256,000 | Up to 4,000 MiB/s | Mission-critical, sustained IOPS and sub-millisecond latency; Nitro is required for the highest limits |
+| **st1** | `st1` | Up to 500 with 1 MiB I/O | Up to 500 MiB/s | Large, frequently accessed sequential workloads; not bootable |
+| **sc1** | `sc1` | Up to 250 with 1 MiB I/O | Up to 250 MiB/s | Cold sequential workloads; not bootable |
 
 ### EBS Best Practices
 
 | Practice | Description |
 |----------|-------------|
-| Prefer **gp3** over gp2 | Independent IOPS/throughput scaling, 20% cheaper |
+| Evaluate **gp3** instead of gp2 | Independent IOPS/throughput scaling and typically lower baseline storage pricing; compare current Regional pricing and workload performance |
 | Enable **EBS encryption** | Use AWS-managed or customer-managed KMS keys |
 | Use **EBS fast snapshot restore** | Reduce first-access latency for restored volumes |
 | Monitor **Burst Balance** | For gp2 only (gp3 has no burst credits) |
@@ -153,22 +152,20 @@ flowchart TD
 |---------|---------------------|-----------------|
 | Versioning | No | Yes |
 | Default Selection | No | Yes |
-| Multiple Block Devices | Limited | Full support |
-| IAM Instance Profile | ARN only | Name or ARN |
-| User Data | Base64-encoded only | Raw or Base64 |
-| **Recommendation** | **Legacy** | **Always use Launch Templates** |
+| Current availability | Accounts created on or after October 1, 2024 cannot create launch configurations | Supported for current Auto Scaling features |
+| **Recommendation** | **Legacy; migrate existing Auto Scaling groups** | **Use launch templates for new and updated workloads** |
 
 ### Auto Scaling Group Settings
 
 | Parameter | Recommendation | Reason |
 |-----------|---------------|--------|
-| Min Size | At least 2 | High availability across AZs |
+| Min Size | Derive from the availability objective; commonly at least 2 across AZs for an HA service | Preserve required capacity during instance/AZ failure and maintenance |
 | Max Size | Based on capacity planning | Prevent runaway scaling |
 | Desired Capacity | Match current load | Baseline capacity |
-| Scale-Out Cooldown | 60-300 seconds | Prevent rapid scaling cycles |
-| Scale-In Cooldown | 300-600 seconds | Allow traffic to stabilize |
-| Health Check Type | ELB (preferred) | More accurate than EC2 status |
-| Health Check Grace Period | 300 seconds | Allow application startup |
+| Default instance warmup | Measure application initialization time | Prevent startup metrics from distorting target tracking and step scaling |
+| Scaling cooldown | Mainly for simple scaling | Prefer target tracking or step scaling; they use instance warmup rather than simple-scaling cooldown behavior |
+| Health Check Type | Add ELB/VPC Lattice checks when they represent application health; retain EC2 status checks | Replace instances that are reachable at the host layer but unhealthy to the service |
+| Health Check Grace Period | Measure application bootstrap time | Avoid replacing a healthy instance before startup completes |
 
 ### Scaling Policies
 
@@ -176,7 +173,7 @@ flowchart TD
 |-------------|-------------|----------|
 | **Target Tracking** | Maintain target metric value | CPU, memory, request count |
 | **Step Scaling** | Different adjustments per threshold | Variable load patterns |
-| **Simple Scaling** | Fixed adjustment per alarm | Basic use cases |
+| **Simple Scaling** | Fixed adjustment followed by a cooldown | Legacy/simple cases; AWS recommends target tracking or step scaling instead |
 | **Scheduled Scaling** | Pre-defined schedule | Predictable traffic patterns |
 | **Predictive Scaling** | ML-based forecast | Repeating patterns |
 
@@ -187,16 +184,13 @@ flowchart LR
         LT --> SG2[EC2 Instance AZ-2]
         LT --> SG3[EC2 Instance AZ-3]
     end
-    ALB[Application Load Balancer] --> SG1
-    ALB --> SG2
-    ALB --> SG3
+    ALB[Application Load Balancer] --> TG[(Target Group)]
+    TG --> SG1
+    TG --> SG2
+    TG --> SG3
     CW[CloudWatch Metrics] -->|CPU / Request Count| SP[Scaling Policy]
     SP -->|Scale Out| ASG
     SP -->|Scale In| ASG
-    TG[(Target Group)] --> ALB
-    SG1 --> TG
-    SG2 --> TG
-    SG3 --> TG
     Client[Users] --> ALB
 ```
 
@@ -209,7 +203,7 @@ flowchart LR
 | Action | When to Use | Considerations |
 |--------|-------------|----------------|
 | **Stop/Start** | Maintenance, cost saving | Data on EBS preserved; instance store (ephemeral) data is LOST |
-| **Hibernate** | Preserve RAM state | Requires instance store volume, limited instance types |
+| **Hibernate** | Preserve RAM state and resume processes | Must be enabled at launch; requires a supported AMI/type and an encrypted EBS root volume large enough for RAM. Instance-store data is lost |
 | **Terminate** | Permanent removal | All ephemeral data lost |
 | **Reboot** | Application recovery | Faster than stop/start |
 
@@ -231,11 +225,11 @@ flowchart LR
 
 | Metric | Threshold | Action |
 |--------|-----------|--------|
-| `CPUUtilization` | > 80% for 5 min | Scale out or right-size up |
+| `CPUUtilization` | Workload-specific SLO/headroom threshold | Correlate with latency, queue depth, throttling, and scaling metrics before changing size |
 | `StatusCheckFailed` | > 0 | Investigate system/instance status |
 | `NetworkIn` / `NetworkOut` | Baseline deviation | Security review, capacity planning |
-| `DiskReadOps` / `DiskWriteOps` | Baseline deviation | EBS performance review |
-| `CreditBalance` (T-series) | < 20% | Consider instance upgrade |
+| EBS volume metrics such as `VolumeQueueLength`, latency, throughput, and IOPS | SLO or provisioned-limit risk | EBS performance review |
+| `CPUCreditBalance` (burstable instances) | Depletion trend | Review Unlimited-mode charges or choose a non-burstable/right-sized instance |
 
 ---
 
@@ -249,3 +243,13 @@ flowchart LR
 | ELB | Target groups, health checks | Load distribution |
 | CloudTrail | API activity logging | Audit and compliance |
 | Config | Resource compliance | Continuous compliance monitoring |
+
+---
+
+## Authoritative references
+
+- [Amazon EBS volume types](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-volume-types.html)
+- [Configure EC2 instance metadata options](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-options.html)
+- [EC2 hibernation prerequisites](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/hibernating-prerequisites.html)
+- [Auto Scaling launch configurations and migration guidance](https://docs.aws.amazon.com/autoscaling/ec2/userguide/launch-configurations.html)
+- [Set the default instance warmup](https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-default-instance-warmup.html)
