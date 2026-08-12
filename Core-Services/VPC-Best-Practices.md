@@ -1,8 +1,12 @@
 # VPC Best Practices
 
+A VPC gives you an isolated, logically separated section of AWS where you control networking, IP addressing, and security boundaries. Proper VPC design is the foundation for secure, scalable, and cost-effective cloud infrastructure—everything else builds on top of it.
+
 ## Network Architecture
 
 ### Recommended VPC Design
+
+A well-structured VPC layout separates traffic by trust level and function, making it easier to apply security controls and scale individual tiers independently.
 
 | Component | Recommendation | CIDR Example |
 |-----------|---------------|--------------|
@@ -13,6 +17,8 @@
 | **IPv6** | Plan dual-stack or IPv6-only subnets where supported to reduce IPv4 pressure | VPC IPv6 CIDRs and `/64` subnets are common AWS-assigned patterns |
 
 ### Subnet Sizing
+
+Sizing subnets correctly prevents running out of IP addresses mid-deployment while avoiding wasted address space that restricts how many subnets you can create.
 
 | CIDR | Usable Hosts | Use Case |
 |------|-------|----------|
@@ -70,6 +76,8 @@ graph TB
 
 ### Internet Access
 
+Choosing the right internet access method affects security posture, cost, and whether private workloads can safely reach external services.
+
 | Component | Purpose | Placement |
 |-----------|---------|-----------|
 | **Internet Gateway (IGW)** | Direct (non-NAT) two-way internet access for resources with public IPs | One per VPC, horizontally scaled and highly available |
@@ -77,6 +85,8 @@ graph TB
 | **NAT Instance** | Self-managed option for specialized filtering, port forwarding, or low-throughput cases; requires patching, scaling, and failover design | Public subnet with source/destination checks disabled and a public/Elastic IP |
 
 ### VPC Peering
+
+Understanding peering's limitations (no transitivity, no CIDR overlap) prevents architectural dead ends when your network grows beyond simple point-to-point connections.
 
 | Feature | Description |
 |---------|-------------|
@@ -88,6 +98,8 @@ graph TB
 
 ### AWS Transit Gateway
 
+Transit Gateway eliminates the N-squared routing complexity of peering meshes, making it essential when you manage more than a handful of VPCs or need hybrid connectivity.
+
 | Feature | Description | Benefit |
 |---------|-------------|---------|
 | **Hub-and-Spoke** | Centralized connectivity model | Simplifies VPC management |
@@ -97,6 +109,8 @@ graph TB
 | **On-Premises Connect** | Direct Connect gateway with a transit virtual interface and Transit Gateway association | Hybrid cloud integration |
 
 ### Connectivity Comparison
+
+Matching the connectivity method to your latency, bandwidth, and deployment timeline requirements avoids costly re-architecture after the initial design is locked in.
 
 | Method | Latency | Bandwidth | Use Case |
 |--------|---------|-----------|----------|
@@ -137,6 +151,8 @@ graph LR
 
 ### Security Group Best Practices
 
+Security groups are the first line of defense at the instance level; misconfigurations here are among the most common causes of cloud security incidents.
+
 | Practice | Description |
 |----------|-------------|
 | **Use SG references** | Reference other SGs instead of IP ranges |
@@ -147,6 +163,8 @@ graph LR
 | **SG modifications take effect immediately** | No instance restart required for rule changes |
 
 ### Common SG Configurations
+
+Layered SG rules that reference each other create a chain of trust, so a compromise in one tier doesn't automatically grant access to the next.
 
 | Resource | Inbound Rules | Outbound Rules |
 |----------|--------------|----------------|
@@ -160,6 +178,8 @@ graph LR
 
 ## AWS Network Firewall & Gateway Load Balancer
 
+Centralized traffic inspection catches threats that security groups and NACLs can't—like encrypted payload inspection, domain filtering, and signature-based intrusion detection.
+
 | Component | Purpose | Placement |
 |-----------|---------|-----------|
 | **AWS Network Firewall** | Stateful, managed IDS/IPS and traffic filtering (domain, protocol, signature-based rules) | Dedicated inspection subnet/VPC, typically routed via Transit Gateway |
@@ -172,6 +192,8 @@ graph LR
 
 ### NACL vs Security Group
 
+NACLs and security groups operate at different layers; knowing the distinction prevents subtle rule conflicts and the "why is my traffic blocked" debugging cycle.
+
 | Feature | Security Group | Network ACL |
 |---------|---------------|-------------|
 | **Level** | Instance level | Subnet level |
@@ -182,6 +204,8 @@ graph LR
 | **Defaults** | Custom SG: no inbound, allow-all outbound; default SG also allows inbound from itself | Default NACL allows all; a new custom NACL denies all until rules are added |
 
 ### NACL Rule Design
+
+Because NACLs are stateless, every direction and ephemeral port range must be explicitly accounted for—or legitimate return traffic will be silently dropped.
 
 | Rule # | Type | Protocol | Port | Action | Purpose |
 |--------|------|----------|------|--------|---------|
@@ -198,12 +222,16 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 
 ### VPC DNS Settings
 
+Disabling DNS settings breaks internal service discovery and hostname resolution, causing cascading failures across nearly every AWS managed service.
+
 | Setting | Value | Description |
 |---------|-------|-------------|
 | **enableDnsSupport** | **true** | Required for DNS resolution in VPC |
 | **enableDnsHostnames** | **true** | Instances get DNS hostnames |
 
 ### Private Hosted Zones
+
+Private hosted zones let applications use friendly internal names instead of IP addresses, simplifying configuration and reducing breakage during infrastructure changes.
 
 | Feature | Description |
 |---------|-------------|
@@ -218,6 +246,8 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 
 ### Interface Endpoints (PrivateLink)
 
+Endpoints keep traffic to AWS services off the public internet, reducing exposure, eliminating NAT costs, and satisfying compliance requirements that mandate private connectivity.
+
 | Service | Endpoint Type | Cost | Use Case |
 |---------|--------------|------|----------|
 | S3 | Gateway | Free | Private S3 access |
@@ -228,6 +258,8 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 | KMS | Interface | $ per hour + data | Private key operations |
 
 ### Endpoint Best Practices
+
+Proper endpoint placement and policy restrictions ensure private connectivity actually delivers the security and performance benefits it promises.
 
 | Practice | Description |
 |----------|-------------|
@@ -243,6 +275,8 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 
 ### Flow Log Configuration
 
+Flow logs are your only network-level visibility into what traffic is actually flowing through your VPC, making them essential for troubleshooting, compliance, and threat detection.
+
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
 | **Log Level** | ACCEPT and REJECT | Full visibility |
@@ -252,6 +286,8 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 | **Destination encryption** | Configure CloudWatch Logs or S3 encryption and least-privilege delivery permissions | Flow Logs has no standalone "TLS encryption" toggle |
 
 ### Flow Log Analysis
+
+Raw flow logs are voluminous and hard to interpret at scale; pairing them with the right analysis tools turns noise into actionable security and performance insights.
 
 | Use Case | Tool | Description |
 |----------|------|-------------|
@@ -266,6 +302,8 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 
 ### High Availability Design
 
+Choosing between single-AZ, multi-AZ, and multi-region directly determines how much downtime you can survive and how much you'll pay for redundancy you may never use.
+
 | Component | Single AZ | Multi-AZ | Multi-Region |
 |-----------|-----------|----------|--------------|
 | **Availability** | Depends on component placement | Can tolerate an AZ failure when every dependency is designed across AZs | Can tolerate selected Regional failures only with tested cross-Region data and traffic failover |
@@ -275,6 +313,8 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 | **RPO** | Determined by data service | Determined by data service and replication mode | Determined by cross-Region replication and consistency mode |
 
 ### Disaster Recovery Strategies
+
+Your DR strategy defines the trade-off between recovery speed, data loss tolerance, and ongoing cost—picking the wrong one means either overpaying or losing too much data when disaster strikes.
 
 | Strategy | RTO | RPO | Cost | Complexity |
 |----------|-----|-----|------|------------|
@@ -289,6 +329,8 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 
 ### Private IP Ranges (RFC 1918)
 
+Picking the right RFC 1918 range upfront determines how much address space you have for growth and whether you'll run into conflicts with on-premises networks or other VPCs.
+
 | Range | CIDR | Total IPv4 Addresses |
 |-------|------|-------------|
 | 10.0.0.0 - 10.255.255.255 | /8 | 16,777,216 |
@@ -297,6 +339,8 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 
 ### Overlap Avoidance
 
+CIDR overlaps silently break connectivity at peering, Transit Gateway, and Direct Connect boundaries—detecting and preventing them early saves weeks of network debugging.
+
 | Scenario | Risk | Solution |
 |----------|------|----------|
 | VPC peering with overlapping CIDRs | Not allowed | Use different CIDR ranges |
@@ -304,6 +348,8 @@ NACLs are stateless, so define corresponding outbound rules and the client/serve
 | Multiple accounts in Organization | Planning complexity | Centralized IPAM |
 
 ### AWS IP Address Manager (IPAM)
+
+Without centralized IP management across accounts and regions, CIDR planning becomes a manual error-prone process that inevitably produces conflicts as the organization grows.
 
 | Feature | Description |
 |---------|-------------|

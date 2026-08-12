@@ -1,8 +1,12 @@
 # CloudWatch Best Practices
 
+Observability is the foundation of reliable cloud operations. Without it, incidents go undetected until users are impacted, mean-time-to-recovery balloons, and root-cause analysis becomes guesswork. CloudWatch provides the metrics, logs, and signals needed to detect, diagnose, and resolve issues before they affect business outcomes.
+
 ## Metrics
 
 ### Standard vs Custom Metrics
+
+Choosing the right metric type balances cost, resolution, and the specificity needed to diagnose issues.
 
 | Type | Source | Cost | Use Case |
 |------|--------|------|----------|
@@ -25,6 +29,8 @@ CloudWatch retains all metric data, but the queryable *resolution* degrades over
 After each window, data is automatically aggregated to the next coarser period rather than discarded — total retention is 15 months, but only at 1-hour resolution.
 
 ### Key Metrics by Service
+
+Knowing which signals matter per service prevents monitoring gaps and alert noise.
 
 | Service | Useful signals | Alarm design |
 |---------|----------------|--------------|
@@ -57,6 +63,8 @@ flowchart LR
 
 ### Alarm Configuration
 
+Proper alarm settings distinguish real incidents from noise, ensuring on-call teams respond to what actually matters.
+
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
 | **Evaluation periods** | Use M-of-N evaluation matched to signal frequency and recovery objective | Reduce noise without delaying detection excessively |
@@ -68,6 +76,8 @@ flowchart LR
 
 ### Alarm Best Practices
 
+Structuring alarms intentionally reduces fatigue and ensures the right person acts on the right signal at the right time.
+
 | Practice | Description | Benefit |
 |----------|-------------|---------|
 | **Hierarchical alarms** | Resource -> Service -> Account levels | Clear ownership and escalation |
@@ -77,6 +87,8 @@ flowchart LR
 | **Annotation** | Document alarm purpose | Operational clarity |
 
 ### Composite Alarms
+
+Combining simple alarms with logic operators creates precise, multi-condition alerts that fire only when the full pattern indicates a real problem.
 
 | Operator | Description | Use Case |
 |----------|-------------|----------|
@@ -90,6 +102,8 @@ flowchart LR
 
 ### Dashboard Design
 
+Dashboards are the first screen operators see during an incident; well-designed ones surface the right signals at a glance.
+
 | Element | Recommendation |
 |---------|---------------|
 | **Widgets** | Metrics, logs, alarms, text, and supported service widgets |
@@ -100,6 +114,8 @@ flowchart LR
 | **Cost** | Pricing and free-tier allowances vary; verify the current CloudWatch pricing page |
 
 ### Dashboard Templates
+
+Tailoring dashboards to audience and use case ensures each stakeholder sees what they need without distraction.
 
 | Dashboard | Purpose | Key Widgets |
 |-----------|---------|-------------|
@@ -115,6 +131,8 @@ flowchart LR
 
 ### Log Groups
 
+Log groups are the primary container for CloudWatch Logs; configuring them correctly governs cost, security, and query performance.
+
 | Setting | Recommendation |
 |---------|---------------|
 | **Retention** | Select an explicit supported period from one day through 10 years, or retain indefinitely only when required |
@@ -127,6 +145,8 @@ flowchart LR
 
 ### Log Insights
 
+Log Insights turns raw log data into actionable answers through purpose-built query capabilities.
+
 | Feature | Description | Use Case |
 |---------|-------------|----------|
 | **Query language** | Purpose-built Logs Insights QL (also supports OpenSearch PPL and standard SQL syntax) | Ad-hoc analysis |
@@ -136,6 +156,8 @@ flowchart LR
 | **Statistics** | Aggregation functions | Trend analysis |
 
 ### Log Queries
+
+Knowing the core query functions lets you build effective ad-hoc investigations without memorizing an entire language.
 
 | Function | Description | Example |
 |----------|-------------|---------|
@@ -152,6 +174,8 @@ flowchart LR
 
 ### Canary Configuration
 
+Canaries simulate real user journeys to detect outages before customers report them; proper configuration ensures they are reliable and cost-effective.
+
 | Setting | Recommendation |
 |---------|---------------|
 | **Schedule** | Every 1-5 minutes for critical paths |
@@ -162,6 +186,8 @@ flowchart LR
 | **Custom scripts** | Multi-step validation |
 
 ### Use Cases
+
+Matching canary use cases to real business risks ensures synthetic monitoring delivers measurable value.
 
 | Use Case | Description |
 |----------|-------------|
@@ -177,6 +203,8 @@ flowchart LR
 
 ### Machine Learning Detection
 
+ML-based anomaly detection surfaces deviations from normal log patterns without requiring manual threshold tuning.
+
 | Feature | Description |
 |---------|-------------|
 | **Anomaly detection** | ML-based log pattern analysis |
@@ -185,6 +213,8 @@ flowchart LR
 | **Logs Insights command** | Performs on-demand anomaly analysis for a query range |
 
 ### Configuration
+
+Properly scoping and training anomaly detectors prevents false positives and ensures the ML model reflects actual application behavior.
 
 | Setting | Recommendation |
 |---------|---------------|
@@ -197,6 +227,8 @@ flowchart LR
 
 ## Application-Centric and Multi-Account Observability
 
+Observability across services and accounts provides a unified view of system health, reducing mean-time-to-resolution for complex, distributed architectures.
+
 | Capability | Best Practice |
 |------------|---------------|
 | **Application Signals** | Use supported OpenTelemetry-based instrumentation to discover services/dependencies, track latency/availability/errors, and define service-level objectives |
@@ -208,6 +240,8 @@ flowchart LR
 ---
 
 ## Cost Optimization
+
+CloudWatch costs scale with volume; right-sizing retention, resolution, and scope keeps observability affordable at scale.
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
@@ -222,6 +256,8 @@ flowchart LR
 ---
 
 ## Cross-Service Integration
+
+CloudWatch does not operate in isolation; integrating it with other AWS services closes the loop from detection to automated response.
 
 | Service | Integration | Purpose |
 |---------|------------|---------|

@@ -1,10 +1,14 @@
 # X-Ray Best Practices
 
+Distributed tracing is critical for modern microservice architectures because requests span multiple services, making it impossible to pinpoint latency, errors, or bottlenecks by examining individual components in isolation. By capturing the full lifecycle of a request across all downstream dependencies, tracing provides end-to-end visibility that enables faster root-cause analysis, informed capacity planning, and reliable SLO tracking.
+
 ## Architecture
 
 > **IMPORTANT (2026):** AWS X-Ray SDKs and Daemon are in **maintenance mode** (security fixes only). For new projects, use **AWS Distro for OpenTelemetry (ADOT)** / OpenTelemetry as the recommended instrumentation approach. Existing X-Ray deployments should plan migration to OpenTelemetry.
 
 ### Components
+
+Understanding each building block and its role is essential for proper architecture, troubleshooting, and planning the migration from legacy X-Ray SDKs to OpenTelemetry.
 
 | Component | Description | Purpose |
 |-----------|-------------|---------|
@@ -16,6 +20,8 @@
 | **SDK** | Programmatic access | Integration |
 
 ### Deployment Options
+
+Choosing the right deployment model ensures telemetry data reaches X-Ray reliably while matching your infrastructure's operational constraints and cost profile.
 
 | Option | Description | Use Case |
 |--------|-------------|----------|
@@ -45,6 +51,8 @@ flowchart LR
 
 ### Instrumentation Choices
 
+Selecting the right instrumentation approach now determines long-term maintainability, especially as X-Ray SDKs enter maintenance mode and OpenTelemetry becomes the standard.
+
 | Choice | Status | Recommendation |
 |--------|--------|----------------|
 | OpenTelemetry SDKs and auto-instrumentation | Active ecosystem and AWS-recommended direction | Use for new instrumentation and migrations |
@@ -54,6 +62,8 @@ flowchart LR
 
 ### Instrumentation Levels
 
+Matching instrumentation depth to business value prevents wasted effort on low-impact code paths while ensuring critical flows receive the visibility they need.
+
 | Level | Description | Effort | Coverage |
 |-------|-------------|--------|----------|
 | **Service-level** | AWS service calls | Low | AWS services only |
@@ -62,6 +72,8 @@ flowchart LR
 | **Auto-instrumentation** | Agent-based or library-assisted instrumentation | Low, but requires configuration and validation | Framework-dependent |
 
 ### Subsegment Best Practices
+
+Well-designed subsegments turn raw trace data into actionable diagnostics, making it easier to isolate slow operations and reproduce errors.
 
 | Practice | Description |
 |----------|-------------|
@@ -78,6 +90,8 @@ flowchart LR
 
 ### Map Features
 
+The service map translates thousands of individual traces into an at-a-glance topology, letting teams spot problematic dependencies without diving into raw data.
+
 | Feature | Description | Use Case |
 |---------|-------------|----------|
 | **Service dependencies** | Visualize service graph | Architecture understanding |
@@ -87,6 +101,8 @@ flowchart LR
 | **Correlated logs and alarms** | Open supported CloudWatch telemetry from a node | Faster investigation |
 
 ### Map Interpretation
+
+Correctly reading the color-coded indicators turns the service map from a static diagram into an actionable incident-response tool.
 
 | Indicator | Meaning | Action |
 |-----------|---------|--------|
@@ -101,6 +117,8 @@ flowchart LR
 
 ### Trace Details
 
+Knowing which trace sections to examine first reduces mean-time-to-resolution when investigating latency spikes or intermittent failures.
+
 | Section | Description | Use Case |
 |---------|-------------|----------|
 | **Service graph** | Visual dependency map | Architecture overview |
@@ -109,6 +127,8 @@ flowchart LR
 | **Raw JSON** | Complete trace data | Detailed debugging |
 
 ### Trace Sampling
+
+Sampling directly balances observability against cost and overhead, so getting the rates right is essential for sustainable production tracing.
 
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
@@ -121,6 +141,8 @@ flowchart LR
 The default rule is a baseline, not a universal production target. With centralized sampling, X-Ray coordinates reservoir allocation across clients; local sampling rules can apply a reservoir per process and therefore sample more traffic as the fleet grows.
 
 ### Sampling Rules
+
+Targeting sampling rules to high-value paths ensures critical transactions are captured while keeping overall trace volume manageable.
 
 | Rule | Description | Use Case |
 |------|-------------|----------|
@@ -149,6 +171,8 @@ flowchart TD
 
 An X-Ray group is a named filter expression, not a separate trace copy. Filter criteria can combine service/resource fields, annotations, HTTP attributes, response time, and error/fault flags.
 
+Filter expressions are the mechanism that turns raw trace volume into focused, queryable views aligned with how your team investigates incidents.
+
 | Filter criterion | Use Case |
 |------------------|----------|
 | **Service/resource** | Service-level analysis |
@@ -157,6 +181,8 @@ An X-Ray group is a named filter expression, not a separate trace copy. Filter c
 | **Fault/error/response time** | Incident-focused analysis |
 
 ### Insights
+
+Automated anomaly detection surfaces problems before they cascade, but scoping insights to relevant groups prevents alert fatigue and unnecessary cost.
 
 | Feature | Description | Use Case |
 |---------|-------------|----------|
@@ -173,6 +199,8 @@ An X-Ray group is a named filter expression, not a separate trace copy. Filter c
 
 > **Note:** X-Ray trace and service-graph data is retained for **30 days** (fixed, non-configurable). If longer retention is required, design a separate telemetry export/archive path; X-Ray does not provide a retention setting that extends this window.
 
+Planning around the fixed 30-day window early avoids last-minute data loss and ensures compliance or postmortem requirements are met.
+
 | Duration | Description | Use Case |
 |----------|-------------|----------|
 | 30 days | Default and only retention period | Standard monitoring, trend analysis |
@@ -180,6 +208,8 @@ An X-Ray group is a named filter expression, not a separate trace copy. Filter c
 | Parallel OpenTelemetry export | Send spans to additional approved backends through a collector | Search or retention requirements beyond X-Ray |
 
 ### Cost Considerations
+
+Tracing cost scales with data volume, so understanding the cost drivers enables teams to maintain visibility without exceeding budget.
 
 | Factor | Impact | Optimization |
 |--------|--------|--------------|
@@ -194,6 +224,8 @@ An X-Ray group is a named filter expression, not a separate trace copy. Filter c
 
 ### Key Signals
 
+Linking trace-derived signals to the right alerting mechanism ensures teams are notified on real problems rather than chasing telemetry noise.
+
 | Signal | Description | Alerting approach |
 |--------|-------------|-------------------|
 | Request rate and latency | Trace-map/service response behavior | Prefer Application Signals or service-native CloudWatch metrics tied to SLOs |
@@ -202,6 +234,8 @@ An X-Ray group is a named filter expression, not a separate trace copy. Filter c
 | Trace continuity | Expected requests have trace IDs and downstream context | Add telemetry pipeline health checks and collector/agent log alarms |
 
 ### CloudWatch Integration
+
+Combining traces with metrics, logs, and dashboards creates a unified observability story that bridges the gap between alerting and diagnosis.
 
 | Integration | Description |
 |-------------|-------------|
@@ -213,6 +247,8 @@ An X-Ray group is a named filter expression, not a separate trace copy. Filter c
 ---
 
 ## Cross-Service Integration
+
+Proper cross-service integration ensures trace context survives every hop, so the service map and timelines reflect the true request path.
 
 | Service | Integration | Purpose |
 |---------|------------|---------|

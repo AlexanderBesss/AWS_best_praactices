@@ -4,6 +4,8 @@ AWS Key Management Service (AWS KMS) protects key material and performs cryptogr
 
 ## Choose the Right Key Type
 
+Selecting the correct key type determines which cryptographic operations are available and prevents architectural mismatches later.
+
 | Key type | Supported operations | Typical use |
 |---|---|---|
 | **Symmetric encryption** | Encrypt, decrypt, re-encrypt, and generate data keys | Default choice for envelope encryption and most AWS service integrations |
@@ -19,6 +21,8 @@ AWS Key Management Service (AWS KMS) protects key material and performs cryptogr
 
 `Compromised` is not an AWS KMS key state. Investigate suspected compromise, stop new use, and replace the key according to the incident plan.
 
+Recognizing key states early prevents failed operations and guides the correct remediation path.
+
 | State | Meaning | Operational response |
 |---|---|---|
 | `Enabled` | Cryptographic operations are available | Normal operation |
@@ -31,6 +35,8 @@ AWS Key Management Service (AWS KMS) protects key material and performs cryptogr
 ## Authorization and Key Policies
 
 Every KMS key has exactly one key policy. In the key-owning account, an IAM policy can grant access only when the key policy delegates permission management to the account; a key policy can also grant a principal directly. Explicit denies still win. For cross-account use, the key policy in the key-owning account **and** an IAM policy in the caller's account are required.
+
+Proper authorization separates administrative power from routine use and keeps the blast radius of a compromised credential small.
 
 | Control | Best practice |
 |---|---|
@@ -53,6 +59,8 @@ flowchart LR
 ```
 
 ### Common Application Permissions
+
+Mapping permissions to encryption patterns avoids overprivileged roles and makes access reviews faster.
 
 | Pattern | Common permissions |
 |---|---|
@@ -90,6 +98,8 @@ sequenceDiagram
 
 ## Rotation and Replacement
 
+Choosing the right rotation strategy balances forward secrecy with operational complexity and decryptability of existing data.
+
 | Method | Applies to | Behavior |
 |---|---|---|
 | Automatic rotation | Customer managed, symmetric encryption keys with `AWS_KMS` key material | Default period is 365 days; configurable from 90 through 2,560 days |
@@ -101,6 +111,8 @@ AWS managed keys rotate automatically every year and cannot be configured by cus
 ## Grants
 
 Grants are commonly used by integrated AWS services for temporary or delegated access. They are eventually consistent; use a grant token when the new grant must be used immediately.
+
+Tight grant constraints limit what a principal can do with the key and for which data, reducing the impact of misuse.
 
 | Control | Recommendation |
 |---|---|
@@ -114,6 +126,8 @@ Grants are commonly used by integrated AWS services for temporary or delegated a
 `RetiringPrincipal` and the grant ID identify/manage a grant; they are not grant constraints.
 
 ## Monitoring and Incident Readiness
+
+Monitoring KMS activity surfaces policy changes, misuse, and infrastructure failures before they cause data loss or outages.
 
 | Signal | What to monitor |
 |---|---|

@@ -1,8 +1,12 @@
 # Route 53 Best Practices
 
+A well-designed DNS strategy is the foundation of reliable, performant, and secure service delivery. Because DNS sits at the entry point of every request, the choices you make around routing, health evaluation, and resilience directly affect availability, latency, and the user experience.
+
 ## Routing Policies
 
 ### Policy Comparison
+
+Each routing policy encodes a different traffic-selection strategy; picking the right one determines how requests reach your endpoints.
 
 | Policy | Core behavior | Health-check aware | Use Case |
 |--------|---------------|--------------------|----------|
@@ -16,6 +20,8 @@
 | **IP-based** | Select by configured CIDR collection | Yes | Route known client networks differently |
 
 ### Policy Selection Matrix
+
+This matrix maps common requirements to the policy that satisfies them most directly.
 
 | Requirement | Recommended Policy |
 |-------------|-------------------|
@@ -33,6 +39,8 @@
 
 ### Health Check Types
 
+Health checks are the mechanism Route 53 uses to determine whether an endpoint is serving traffic, so selecting the right type matters for accuracy and cost.
+
 | Type | Description | Use Case |
 |------|-------------|----------|
 | **Endpoint** | HTTP/HTTPS, TCP, HTTPS with string matching | Application health |
@@ -40,6 +48,8 @@
 | **Calculated Health Check** | Combine multiple child health checks with AND/OR/NOT logic | Complex health logic |
 
 ### Health Check Configuration
+
+These settings control how Route 53 probes your endpoints; tuning them balances detection speed, accuracy, and cost.
 
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
@@ -52,6 +62,8 @@
 | **Search string** | Expected response | Validate response content |
 
 ### Health Check Best Practices
+
+Implementing these practices ensures health checks provide reliable signals without introducing noise or unnecessary expense.
 
 | Practice | Description |
 |----------|-------------|
@@ -75,6 +87,8 @@ flowchart LR
 ## Record Types
 
 ### Supported Record Types
+
+Choosing the correct record type determines what kind of address or delegation information DNS returns to clients.
 
 | Type | Description | Use Case |
 |------|-------------|----------|
@@ -100,6 +114,8 @@ flowchart LR
 
 An alias is a Route 53 record feature on supported record types (usually A/AAAA), not a DNS record type of its own.
 
+Understanding the trade-offs between alias and CNAME helps you minimize extra queries and cost while maintaining flexibility.
+
 | Feature | Alias | CNAME |
 |---------|-------|-------|
 | **Zone apex** | Supported | Not supported |
@@ -115,6 +131,8 @@ An alias is a Route 53 record feature on supported record types (usually A/AAAA)
 
 ### VPC Association
 
+Private hosted zones scope DNS resolution to specific VPCs, making these association rules essential for internal name resolution.
+
 | Feature | Description |
 |---------|-------------|
 | **Private zone** | Resolves only in associated VPCs |
@@ -125,6 +143,8 @@ An alias is a Route 53 record feature on supported record types (usually A/AAAA)
 | **Outbound endpoint** | VPC to on-premises resolution |
 
 ### Use Cases
+
+These patterns show how private hosted zones solve real-world internal DNS and hybrid connectivity needs.
 
 | Use Case | Configuration |
 |----------|--------------|
@@ -139,6 +159,8 @@ An alias is a Route 53 record feature on supported record types (usually A/AAAA)
 
 ### DNSSEC Configuration
 
+DNSSEC adds cryptographic signatures to DNS responses; these settings define how keys are managed and rotated.
+
 | Setting | Recommendation |
 |---------|---------------|
 | **Enable DNSSEC** | For public zones when the registrar/parent-zone chain of trust and operations are ready; test rollover and failure recovery |
@@ -149,6 +171,8 @@ An alias is a Route 53 record feature on supported record types (usually A/AAAA)
 | **VPC resolver validation** | Enable Route 53 Resolver DNSSEC validation separately for VPCs that require validation; authoritative signing and recursive validation are different controls |
 
 ### Benefits
+
+DNSSEC addresses core trust concerns in the DNS ecosystem by providing verifiable response authenticity.
 
 | Benefit | Description |
 |---------|-------------|
@@ -163,12 +187,16 @@ An alias is a Route 53 record feature on supported record types (usually A/AAAA)
 
 ARC is a separate AWS service for recovering applications across Availability Zones and Regions. Routing controls integrate with a special Route 53 health check, but ARC also includes non-DNS recovery capabilities:
 
+Each ARC component addresses a different failure scope, from single-AZ impairment to full regional failover.
+
 | Component | Description | Use Case |
 |-----------|-------------|----------|
 | **Region switch** | Orchestrate and monitor multi-Region recovery plans with plan evaluation and execution safety controls | Managed regional failover workflow |
 | **Routing controls** | Highly available on/off switches (backed by a 5-endpoint redundant cluster) that gate traffic shifting | Deterministic, low-latency failover trigger |
 | **Readiness checks (existing customers)** | Audit resource configuration/capacity/quota parity across replicas; this feature is no longer open to new customers | Existing recovery-group/cell designs |
 | **Zonal shift / zonal autoshift** | Shift traffic away from an impaired AZ (via ELB/ASG) in minutes, with optional automatic shift | Fast AZ-level mitigation without a full DR failover |
+
+These practices ensure ARC-driven failover is tested, observable, and aligned with real DNS behavior.
 
 | Practice | Description |
 |----------|-------------|
@@ -182,6 +210,8 @@ ARC is a separate AWS service for recovering applications across Availability Zo
 
 ### Traffic Flow Features
 
+Traffic flow provides a visual, composable way to build complex routing logic from health checks and policies.
+
 | Feature | Description |
 |---------|-------------|
 | **Visual editor** | Drag-and-drop traffic policies |
@@ -192,6 +222,8 @@ ARC is a separate AWS service for recovering applications across Availability Zo
 | **Latency** | Route by lowest latency |
 
 ### Traffic Policy Example
+
+This example shows how individual traffic-flow components compose into a complete routing decision tree.
 
 | Component | Configuration |
 |-----------|--------------|
@@ -206,6 +238,8 @@ ARC is a separate AWS service for recovering applications across Availability Zo
 
 ### Key Signals
 
+These are the metrics and logs that give you early warning of DNS-related health and routing issues.
+
 | Signal | Source | Alert/Analysis |
 |--------|--------|----------------|
 | HealthCheckStatus | Route 53 health-check CloudWatch metrics | Alarm on an unexpected unhealthy state |
@@ -215,6 +249,8 @@ ARC is a separate AWS service for recovering applications across Availability Zo
 | Resolver queries | Route 53 Resolver query logging | Security and hybrid-DNS troubleshooting |
 
 ### Best Practices
+
+Monitoring and testing practices keep your DNS configuration aligned with operational reality.
 
 | Practice | Description |
 |----------|-------------|
@@ -226,6 +262,8 @@ ARC is a separate AWS service for recovering applications across Availability Zo
 ---
 
 ## Cost Optimization
+
+Route 53 costs scale with zone count, query volume, and health-check configuration; these strategies reduce unnecessary spend.
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
@@ -242,6 +280,8 @@ Route 53 pricing varies by hosted-zone count, query volume and routing policy, h
 ---
 
 ## Cross-Service Integration
+
+Route 53 rarely operates in isolation; these integrations show which AWS services connect to DNS and why.
 
 | Service | Integration | Purpose |
 |---------|------------|---------|

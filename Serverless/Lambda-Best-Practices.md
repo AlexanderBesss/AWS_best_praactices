@@ -4,6 +4,8 @@ Design Lambda functions as short-lived, stateless compute units while taking adv
 
 ## Function Design
 
+Functions that follow disciplined design patterns are easier to test, scale, and maintain. These practices reduce coupling, surface failures early, and keep costs predictable.
+
 | Concern | Best practice |
 |---|---|
 | Scope | Keep one function focused on a cohesive capability and event contract |
@@ -17,6 +19,8 @@ Design Lambda functions as short-lived, stateless compute units while taking adv
 Initialize reusable resources outside the handler, contrary to the common but harmful advice to move initialization into the handler. Validate that reused connections remain alive, and never store per-user sensitive state where a later invocation can observe it.
 
 ## Configuration and Quotas
+
+Right-sizing these settings directly affects latency, throughput, and cost. Misconfigured limits cause throttling, silent failures, or unexpected bills.
 
 | Setting | Current service boundary / guidance |
 |---|---|
@@ -47,6 +51,8 @@ flowchart TD
     O --> M
 ```
 
+Cold starts and execution reuse determine the latency profile your users actually experience. Choosing the right technique depends on runtime, cost tolerance, and whether you need a guarantee.
+
 | Technique | Important nuance |
 |---|---|
 | Execution reuse | Move clients/connections outside the handler and cache static assets in `/tmp` |
@@ -62,6 +68,8 @@ VPC attachment is no longer accurately described as creating a new ENI for every
 Scheduled “keep warm” invocations are not a dependable cold-start guarantee and create noise/cost. Use Provisioned Concurrency when a guarantee is required.
 
 ## Invocation and Retry Semantics
+
+Different invocation sources handle failures independently, so understanding each path is essential to avoid duplicate processing or swallowed errors.
 
 | Invocation path | Failure behavior |
 |---|---|
@@ -93,6 +101,8 @@ flowchart TD
 
 ## SQS Event Source Mappings
 
+SQS mappings introduce their own retry and visibility mechanics that must align with function timeout and batch size to avoid message loss or infinite loops.
+
 | Setting | Guidance |
 |---|---|
 | Batch size | Standard queues support up to 10,000 records; FIFO queues up to 10; payload size can reduce the actual record count |
@@ -105,6 +115,8 @@ flowchart TD
 Delete/acknowledge behavior is controlled by the event source mapping. Do not manually delete each SQS message from a normally successful Lambda batch. For FIFO queues, stop processing after the first failure and report failed/unprocessed records to preserve ordering.
 
 ## Security
+
+Lambda functions inherit the blast radius of their execution role, so least-privilege access and secret hygiene are non-negotiable.
 
 | Control | Recommendation |
 |---|---|
@@ -119,6 +131,8 @@ Delete/acknowledge behavior is controlled by the event source mapping. Do not ma
 Lambda code signing validates signed ZIP deployment packages from trusted AWS Signer profiles; it does not apply to container-image functions. Scan both application packages and layers, and patch shared layers/runtimes promptly.
 
 ## Packaging and Deployment
+
+Package format and deployment strategy affect cold-start performance, supply-chain risk, and rollback capability.
 
 | Package | Limits and guidance |
 |---|---|
@@ -135,6 +149,8 @@ Lambda code signing validates signed ZIP deployment packages from trusted AWS Si
 ## Observability
 
 Emit structured logs with service/function name, version, cold-start indicator, request/event ID, correlation ID, and business outcome. Use Embedded Metric Format or Powertools where appropriate to avoid high-cardinality custom metric dimensions.
+
+These metrics are the primary signals for detecting capacity pressure, latency degradation, and terminal failures before they impact users.
 
 | Signal | What it reveals |
 |---|---|
@@ -166,6 +182,8 @@ Lambda cost can include requests, duration, memory architecture, ephemeral stora
 - Compare Lambda with container/batch services for long-running, constantly busy, GPU, specialized networking, or highly stateful workloads.
 
 ## Lambda with Step Functions
+
+Combining Lambda with Step Functions shifts orchestration complexity out of function code, making workflows observable, recoverable, and auditable.
 
 | Decision | Recommendation |
 |---|---|

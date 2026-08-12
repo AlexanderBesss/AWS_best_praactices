@@ -1,8 +1,12 @@
 # DynamoDB Best Practices
 
+DynamoDB is AWS's fully managed serverless NoSQL database, purpose-built for applications that need single-digit millisecond latency at any scale. Because its performance, cost, and reliability depend heavily on how you model data and configure capacity, getting these decisions right early prevents expensive re-architecting later. The guidance below covers the patterns and settings that keep DynamoDB performant, secure, and cost-efficient in production.
+
 ## Data Modeling
 
 ### Design Patterns
+
+Choosing the right data modeling pattern determines whether your application gets millisecond responses or suffers from excessive request fan-out and throttling.
 
 | Pattern | Description | Use Case |
 |---------|-------------|----------|
@@ -38,6 +42,8 @@ graph TB
 
 ### Key Schema Design
 
+Your key schema is the foundation of every query and determines how data is distributed across partitions, directly affecting throughput and latency.
+
 | Key Type | Purpose | Constraints | Best Practice |
 |----------|---------|-------------|---------------|
 | **Partition key** | Determines logical item collection and physical distribution | 1-2,048 bytes | High-cardinality, evenly distributed access |
@@ -45,6 +51,8 @@ graph TB
 | **Composite Key** | HK + RK combination | Both required for queries | Design for query patterns first |
 
 ### Partition Key Selection
+
+A poorly chosen partition key creates hot partitions that throttle under load, while a good one distributes traffic evenly without manual intervention.
 
 | Characteristic | Good Partition Key | Bad Partition Key |
 |---------------|-------------------|-------------------|
@@ -59,6 +67,8 @@ graph TB
 
 ### On-Demand vs Provisioned
 
+Picking the wrong capacity mode means either overpaying for idle reserved capacity or being throttled when you need throughput most.
+
 | Feature | On-Demand | Provisioned |
 |---------|-----------|-------------|
 | **Pricing** | Per read/write request unit actually consumed | Provisioned RCU/WCU-hours; requests above available capacity can be throttled rather than billed as "overage" |
@@ -71,6 +81,8 @@ graph TB
 > On-demand tables instantly support previously reached traffic and up to twice the previous peak. A jump beyond twice the previous peak within 30 minutes can throttle; pre-warm or ramp traffic gradually. Configurable maximum throughput and account/table quotas can also cap traffic.
 
 ### Auto Scaling
+
+Misconfigured scaling bounds leave you throttled during spikes or bleeding money during quiet periods, so getting the min/max/target right matters.
 
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
@@ -86,6 +98,8 @@ graph TB
 
 ### GSI Design
 
+Every GSI adds write amplification and storage cost, so you should create only the indexes that serve real query patterns rather than hypothetical ones.
+
 | Consideration | Recommendation |
 |---------------|----------------|
 | **Number of GSIs** | Add only for defined access patterns; default quota is 20 per table and can be adjustable |
@@ -96,6 +110,8 @@ graph TB
 | **Sort key** | Enable range queries and filtering |
 
 ### Projection Types
+
+Projection choice is the most cost-effective GSI optimization lever, since over-projecting silently inflates storage and write costs for every indexed item.
 
 | Type | Description | Cost Impact | Use Case |
 |------|-------------|-------------|----------|
@@ -109,6 +125,8 @@ graph TB
 
 ### Read Optimization
 
+Read-heavy applications that don't batch or project efficiently burn capacity on network overhead and payload transfer rather than actual data retrieval.
+
 | Technique | Description | Impact |
 |-----------|-------------|--------|
 | **BatchGetItem** | Fetch up to 100 items or 16 MB per call | Reduce network round trips; retry `UnprocessedKeys` with exponential backoff |
@@ -119,6 +137,8 @@ graph TB
 
 ### Write Optimization
 
+Write patterns that ignore batching, atomicity needs, or item-size semantics waste capacity units and create unnecessary retry loops under load.
+
 | Technique | Description | Impact |
 |-----------|-------------|--------|
 | **BatchWriteItem** | Put/delete up to 25 items per call | Reduce round trips; it is not transactional and callers must retry `UnprocessedItems` |
@@ -128,6 +148,8 @@ graph TB
 | **PutItem vs UpdateItem** | Choose for semantics and conditional-write needs | `UpdateItem` does not inherently save WCUs: write capacity is based on the larger item size before or after the update |
 
 ### Hot Partition Avoidance
+
+Hot partitions are the most common cause of throttling in production, and they cannot be fixed by simply increasing provisioned capacity.
 
 | Symptom | Cause | Solution |
 |---------|-------|----------|
@@ -142,6 +164,8 @@ graph TB
 
 ### DAX Features
 
+Understanding DAX's caching semantics is essential because write coherence behavior differs depending on whether writes go through DAX or directly to DynamoDB.
+
 | Feature | Description |
 |---------|-------------|
 | **In-memory caching** | Sub-millisecond read latency |
@@ -151,6 +175,8 @@ graph TB
 | **TTL** | Configurable per-item cache duration |
 
 ### DAX Sizing
+
+Under-provisioned DAX clusters become a bottleneck themselves, while over-provisioned ones add cost without improving cache hit rates.
 
 | Node Type | Relative Capacity | Use Case |
 |-----------|--------------------|----------|
@@ -167,6 +193,8 @@ graph TB
 
 ### Encryption
 
+Skipping encryption configuration at creation time can lock you into insecure defaults, since DAX encryption cannot be enabled retroactively.
+
 | Feature | Description |
 |---------|-------------|
 | **Encryption at rest** | AWS-managed or KMS key |
@@ -174,6 +202,8 @@ graph TB
 | **DAX encryption** | Configure encryption at rest and in transit when the cluster is created; these settings cannot be enabled later on an existing cluster |
 
 ### Access Control
+
+Without fine-grained IAM policies and VPC endpoints, DynamoDB tables are accessible to any IAM principal with broad permissions, creating a compliance and security risk.
 
 | Method | Description |
 |---------|-------------|
@@ -183,6 +213,8 @@ graph TB
 | **VPC endpoints** | Use a DynamoDB gateway endpoint for private routing from a VPC; apply endpoint and IAM policies together |
 
 ### IAM Policy Conditions
+
+Condition keys let you enforce tenant isolation and attribute-level access control without creating separate tables or application-level checks.
 
 | Condition Key | Description |
 |--------------|-------------|
@@ -197,6 +229,8 @@ graph TB
 
 ### Stream View Types
 
+The stream view type determines how much data downstream consumers receive, directly impacting Lambda invocation cost and processing latency.
+
 | Type | Description | Use Case |
 |------|-------------|----------|
 | **KEYS_ONLY** | Only key attributes | Minimal data, key lookup needed |
@@ -205,6 +239,8 @@ graph TB
 | **NEW_AND_OLD_IMAGES** | Both before and after | Change detection, diff |
 
 ### Lambda Triggers
+
+Lambda trigger misconfiguration is a common source of lost stream records and cascading failures when downstream processing falls behind.
 
 | Setting | Recommendation |
 |---------|---------------|
@@ -217,6 +253,8 @@ graph TB
 ---
 
 ## Cost Optimization
+
+DynamoDB costs are driven by capacity mode, index count, storage class, and data lifecycle — optimizing each lever compounds into significant savings.
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
@@ -231,6 +269,8 @@ graph TB
 
 ### Table Classes
 
+Choosing the wrong table class means paying a premium for throughput you don't need or storage you don't use, so match the class to your access pattern.
+
 | Table Class | Storage Cost | Throughput Cost | Best For |
 |-------------|-------------|------------------|----------|
 | **DynamoDB Standard** | Higher | Lower | Default; most workloads |
@@ -244,6 +284,8 @@ Model table and GSI read/write units, table-class storage, backup/PITR storage, 
 
 ## Backup & Recovery
 
+Accidental deletes and corrupted writes are inevitable in production, and without the right backup strategy your RTO and RPO may exceed what your business can tolerate.
+
 | Method | RPO | RTO | Cost | Use Case |
 |--------|-----|-----|------|----------|
 | **On-Demand Backup** | Point-in-time | Minutes | Storage only | Manual snapshots, retained until explicitly deleted |
@@ -255,6 +297,8 @@ Model table and GSI read/write units, table-class storage, backup/PITR storage, 
 ## Global Tables
 
 ### Multi-Region Replication
+
+Global tables introduce consistency trade-offs and cross-region write costs that must be understood before committing to a multi-active architecture.
 
 | Feature | Description |
 |---------|-------------|
@@ -289,6 +333,8 @@ graph LR
 
 ### Global Table Considerations
 
+Cross-region write conflicts and replication lag can cause data inconsistency if the application isn't designed to handle eventual consistency semantics.
+
 | Consideration | Recommendation |
 |---------------|----------------|
 | **Write conflicts** | Design to minimize cross-region writes to same item |
@@ -302,6 +348,8 @@ graph LR
 ## Monitoring
 
 ### Key Metrics
+
+Without monitoring these metrics, throttling and latency degradation will hit users before your team notices, making proactive alerting essential.
 
 | Metric | Warning | Critical |
 |--------|---------|----------|

@@ -4,6 +4,8 @@ AWS Shield protects AWS-hosted applications from distributed denial-of-service (
 
 ## Shield Standard and Shield Advanced
 
+Understanding the capability gap between the free tier and the paid tier prevents over-provisioning and ensures cost protection is available where it matters.
+
 | Capability | Shield Standard | Shield Advanced |
 |---|---|---|
 | Enrollment | Included automatically with AWS accounts | Paid subscription with a commitment; enroll and protect resources explicitly |
@@ -28,6 +30,8 @@ Evaluate the current subscription, support-plan, WAF, and cost-protection requir
 ## Supported Resources and Scope
 
 Shield Standard protections apply automatically to supported AWS edge and regional entry points. Shield Advanced can create explicit protections for the following resource types documented by AWS:
+
+Mapping each entry point to the correct protection model ensures no internet-facing asset is left outside the DDoS defense perimeter.
 
 | Resource | Shield Advanced guidance |
 |---|---|
@@ -58,6 +62,8 @@ flowchart LR
     SRT["Shield Response Team"] -. assists .-> WAF
 ```
 
+A defense-in-depth approach distributes DDoS controls across every network hop so no single layer becomes the failure point.
+
 | Layer | Controls |
 |---|---|
 | Edge and DNS | Route 53, CloudFront, Global Accelerator, anycast ingress, and Shield |
@@ -73,6 +79,8 @@ flowchart LR
 - Avoid relying on network ACLs as a dynamic DDoS control; they are stateless, coarse, and operationally difficult to change during an event.
 
 ## Shield Advanced Setup
+
+Following a structured setup sequence prevents gaps between subscription activation and actual resource protection.
 
 | Step | Best practice |
 |---|---|
@@ -114,6 +122,8 @@ During an event, Shield mitigation is automatic. Contact AWS Support when applic
 ## Monitoring
 
 Shield Advanced publishes metrics in `AWS/DDoSProtection`. Global-service and protection-group metrics are reported in `us-east-1`; regional-resource metrics are reported in the resource's Region.
+
+Aligning the right metric to the right alarm turns raw DDoS telemetry into actionable incident signals.
 
 | Metric | Use |
 |---|---|

@@ -4,6 +4,8 @@ AWS WAF inspects HTTP(S) requests sent to supported resources. It complements, b
 
 ## Scope and Associations
 
+Understanding scope and association targets prevents misconfigured web ACLs that silently fail to protect the intended resource.
+
 | Web ACL scope | Supported association examples |
 |---|---|
 | `CLOUDFRONT` (global) | CloudFront distributions; create and manage the web ACL in `us-east-1` |
@@ -14,6 +16,8 @@ AWS WAF does not associate directly with Network Load Balancers, Global Accelera
 ## Rule Evaluation and Actions
 
 Rules run in ascending numeric priority. A terminating action ends evaluation; non-terminating actions can add labels that later rules match.
+
+Choosing the right action determines whether traffic is silently observed, actively blocked, or sent through a human verification step.
 
 | Action | Terminating behavior | Use |
 |---|---|---|
@@ -43,6 +47,8 @@ flowchart TD
 
 Start with threats demonstrated by the application and threat model, not every rule group at once.
 
+Layered controls address different threat categories, so selecting the right combination balances security coverage against cost and false-positive risk.
+
 | Control | Guidance |
 |---|---|
 | AWS Managed Rules baseline | Evaluate Common Rule Set, Known Bad Inputs, Amazon IP Reputation, and Anonymous IP List as relevant |
@@ -67,6 +73,8 @@ Do not exclude an entire managed rule group because of one false positive. Overr
 ## Rate-Based Rules
 
 A rate-based rule tracks request aggregates over a configurable evaluation window and applies its action when an aggregate exceeds the configured limit. It is not an exact request quota and detection can lag traffic changes.
+
+Properly tuned rate-based rules distinguish legitimate burst traffic from abuse without degrading the experience for real users.
 
 | Setting | Recommendation |
 |---|---|
@@ -101,6 +109,8 @@ AWS WAF inspects only the configured portion of request bodies and other compone
 ## Logging and Data Protection
 
 AWS WAF can send full logs to Amazon CloudWatch Logs, Amazon S3, or Amazon Data Firehose. Destination naming and permissions must follow the WAF logging requirements.
+
+Logging provides forensic visibility into blocked and allowed traffic, but without proper controls it can expose sensitive data and incur significant storage costs.
 
 | Control | Best practice |
 |---|---|

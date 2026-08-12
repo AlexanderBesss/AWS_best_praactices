@@ -1,8 +1,12 @@
 # CI/CD Best Practices
 
+CI/CD is the backbone of modern software delivery, enabling teams to ship changes quickly, safely, and reproducibly. Automating the build, test, and deployment pipeline reduces manual errors, accelerates feedback loops, and ensures every change is validated before reaching production.
+
 ## Pipeline Architecture
 
 ### CodePipeline Stages
+
+A well-structured pipeline stages code from source to production, ensuring each step has a clear responsibility and ownership.
 
 | Stage | Action | Description |
 |-------|--------|-------------|
@@ -31,6 +35,8 @@ graph LR
 
 ### Pipeline Strategy
 
+A tiered pipeline strategy balances speed and safety by automating lower environments while gating production with human approval.
+
 | Environment | Pipeline | Promotion |
 |-------------|----------|-----------|
 | **Development** | Automatic on commit | Every commit |
@@ -43,6 +49,8 @@ graph LR
 
 ### Build Environment
 
+Properly configuring the build environment ensures builds are reproducible, secure, and cost-efficient.
+
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
 | **Image** | Managed image matching runtime | Pre-configured tools |
@@ -53,6 +61,8 @@ graph LR
 | **Logs** | CloudWatch Logs | Build visibility |
 
 ### Build Spec Best Practices
+
+A well-organized buildspec keeps builds fast, reliable, and easy to debug by structuring work into clear phases.
 
 | Practice | Implementation | Benefit |
 |----------|----------------|---------|
@@ -68,6 +78,8 @@ graph LR
 
 ### CodeDeploy Strategies
 
+Choosing the right deployment strategy balances risk, speed, and blast radius for your application's criticality.
+
 | Strategy | Downtime | Risk | Rollback | Use Case |
 |----------|----------|------|----------|----------|
 | **EC2/on-premises in-place** | Depends on minimum healthy hosts | Medium | Optional automatic rollback | Update existing instances |
@@ -77,6 +89,8 @@ graph LR
 | **Lambda/ECS all-at-once** | No planned downtime, but immediate full exposure | Highest blast radius | Alarm-driven automatic rollback when configured | Fast deployment |
 
 ### Blue/Green Deployment
+
+Blue/green deployments eliminate downtime by running two identical environments and switching traffic only after validation.
 
 | Phase | Action | Description |
 |-------|--------|-------------|
@@ -88,6 +102,8 @@ graph LR
 | 6 | Swap on failure | Quick rollback |
 
 ### Canary Deployment
+
+Canary deployments limit blast radius by gradually exposing a small subset of traffic to the new version before a full rollout.
 
 | Setting | Recommendation |
 |---------|---------------|
@@ -118,6 +134,8 @@ graph TB
 
 ### GitOps Deployments
 
+GitOps tools keep cluster state in sync with a Git repository, providing an auditable, declarative deployment model.
+
 | Tool | Target | Description |
 |------|--------|-------------|
 | **Argo CD** | EKS | Declarative, Git-sourced continuous delivery for Kubernetes |
@@ -132,6 +150,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 
 ### Parameter Store Integration
 
+Centralizing configuration in Parameter Store keeps secrets and settings out of code, enabling safe per-environment customization.
+
 | Entry/organization | Use Case | Example |
 |--------------------|----------|---------|
 | **String** | Configuration values | DB endpoint, API URLs |
@@ -140,6 +160,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 | **Hierarchy** | Organized parameters | /app/env/component |
 
 ### Environment Promotion
+
+A staged promotion model ensures changes are progressively validated as they move toward production.
 
 | Stage | Automation | Approval | Testing |
 |-------|-----------|----------|---------|
@@ -154,6 +176,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 
 ### Pipeline Security
 
+Securing the pipeline itself prevents it from becoming the weakest link in the deployment chain.
+
 | Control | Implementation |
 |---------|---------------|
 | **Secrets management** | Secrets Manager or Parameter Store secret references; never plaintext pipeline/build environment variables |
@@ -165,6 +189,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 | **Audit trail** | CloudTrail for pipeline actions |
 
 ### Secrets Management
+
+Proper secrets management ensures credentials never leak into logs, source code, or build artifacts.
 
 | Method | Description | Use Case |
 |--------|-------------|----------|
@@ -179,6 +205,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 
 ### Test Pyramid
 
+A layered test strategy catches defects early at low cost while still validating end-to-end behavior before production.
+
 | Level | Tools | Frequency | Duration |
 |-------|-------|-----------|----------|
 | **Unit tests** | Jest, pytest, JUnit | Every commit | Seconds |
@@ -188,6 +216,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 | **Security tests** | SAST/dependency/IaC scanners; Inspector evaluates supported ECR/deployed resources | Every build plus continuous/post-push scanning | Varies |
 
 ### Test Automation
+
+Automating tests at the right pipeline stage provides fast feedback while blocking defective code from advancing.
 
 | Test Type | Pipeline Stage | Failure Action |
 |-----------|---------------|----------------|
@@ -204,6 +234,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 
 ### Pipeline Metrics
 
+Tracking pipeline metrics surfaces bottlenecks, degradation, and systemic quality issues before they impact users.
+
 | Metric | Description | Alert Threshold |
 |--------|-------------|----------------|
 | Pipeline execution time | Total duration | > baseline + 2 sigma |
@@ -217,6 +249,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 
 ## Cost Optimization
 
+CI/CD infrastructure can accumulate hidden costs; right-sizing and caching keep spend proportional to value delivered.
+
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
 | **Right-size build instances** | Match CPU, memory, and architecture to measured build needs | Lower compute cost |
@@ -229,6 +263,8 @@ Use GitOps for Kubernetes workloads where the Git repository is the single sourc
 ---
 
 ## Cross-Service Integration
+
+Understanding how AWS services interconnect ensures the pipeline is built on the right tools for each responsibility.
 
 | Service | Integration | Purpose |
 |---------|------------|---------|

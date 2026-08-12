@@ -4,6 +4,8 @@ Amazon EventBridge routes events; it is not a durable work queue for consumers. 
 
 ## Select the Right EventBridge Capability
 
+Choosing the wrong capability introduces unnecessary latency, cost, and operational complexity. Match the capability to the routing pattern and delivery guarantees your system actually needs.
+
 | Capability | Use it for | Key characteristic |
 |---|---|---|
 | Event bus + rules | Many-to-many event routing and fan-out | Rules match events and deliver independently to targets |
@@ -33,6 +35,8 @@ flowchart LR
 
 Custom events should follow the EventBridge envelope and put domain data under `detail`.
 
+Consistent field conventions reduce consumer parsing errors and make cross-service correlation tractable.
+
 | Field | Guidance |
 |---|---|
 | `source` | Stable, owned namespace such as `com.example.orders` |
@@ -51,6 +55,8 @@ Custom events should follow the EventBridge envelope and put domain data under `
 ## Event Pattern Design
 
 Event patterns are structural JSON filters. Values are arrays; omitted fields are ignored. String matching is exact and case-sensitive unless an operator such as `equals-ignore-case` is used. Numeric equality without the numeric operator is based on JSON string representation.
+
+Picking the right operator prevents silent rule mismatches and keeps fan-out predictable as event schemas evolve.
 
 | Operator/pattern | Use |
 |---|---|
@@ -71,6 +77,8 @@ Event patterns are structural JSON filters. Values are arrays; omitted fields ar
 ## Rules, Delivery, and Failure Handling
 
 Each rule target has its own role/permissions, retry policy, and optional DLQ. A match is not proof of successful target delivery.
+
+Misconfigured retry and DLQ settings are the most common cause of silent data loss or unbounded event age.
 
 | Setting | Guidance |
 |---|---|
@@ -132,6 +140,8 @@ flowchart LR
 
 Scheduled rules are a legacy capability. Prefer EventBridge Scheduler for new schedules.
 
+Scheduler settings directly affect invocation reliability, quota consumption, and the risk of orphaned completed schedules.
+
 | Setting | Recommendation |
 |---|---|
 | Time expression | Use `at` for one-time work and `rate`/`cron` for recurring work |
@@ -147,6 +157,8 @@ Check Scheduler quotas for schedules and invocation throughput in each Region. S
 ## Monitoring
 
 Use `AWS/Events` metrics with the correct `EventBusName` and `RuleName` dimensions.
+
+These metrics distinguish matching from delivery and expose retries, DLQ pressure, and latency before business impact occurs.
 
 | Metric | Meaning/action |
 |---|---|

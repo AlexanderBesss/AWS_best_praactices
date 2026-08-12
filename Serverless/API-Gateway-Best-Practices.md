@@ -4,6 +4,8 @@ Choose an API type from required features and client behavior, then protect the 
 
 ## Choose the API Type
 
+The three API types differ in cost, latency, and feature set. Matching the type to your actual requirements avoids paying for unused capabilities and reduces operational complexity.
+
 | Capability | REST API | HTTP API | WebSocket API |
 |---|---|---|---|
 | Primary model | Request/response with extensive API-management features | Lower-cost, lower-latency HTTP proxy/API | Stateful, bidirectional connections and routes |
@@ -40,6 +42,8 @@ flowchart TD
 
 ## Authorization and API Keys
 
+Selecting the right authorization mechanism balances security posture, latency overhead, and implementation complexity. Each option carries distinct caching and scope-verification responsibilities.
+
 | Mechanism | Good fit | Important controls |
 |---|---|---|
 | IAM/SigV4 | AWS workloads and service-to-service calls | Least-privilege `execute-api:Invoke`, resource policies, source VPC/account conditions |
@@ -69,6 +73,8 @@ REST API request validation can check required request parameters and validate a
 
 API Gateway throttling uses token-bucket targets and is best effort. Account/Region, API/stage, route/method, and REST usage-plan limits can all apply; the effective lower limit wins.
 
+Layered throttling prevents a single burst from cascading into backend overload. Each layer serves a distinct protection target, from the account ceiling down to individual operations.
+
 | Layer | Purpose |
 |---|---|
 | Account/Region quota | Shared ceiling across APIs; request an increase only after checking backend capacity |
@@ -85,6 +91,8 @@ API Gateway throttling uses token-bucket targets and is best effort. Account/Reg
 
 Stage caching is available only for REST APIs and is provisioned per stage.
 
+Cache configuration directly affects both cost and data freshness. Misconfigured keys or TTLs either waste capacity or serve stale responses to clients.
+
 | Setting | Guidance |
 |---|---|
 | Methods | Cache safe, idempotent reads; do not cache personalized responses without identity-aware keys |
@@ -97,6 +105,8 @@ Stage caching is available only for REST APIs and is provisioned per stage.
 API Gateway stage caching is not CloudFront caching. If CloudFront is used, define its cache policy independently and avoid caching authenticated/error responses accidentally.
 
 ## Integrations and Timeouts
+
+The integration type determines latency characteristics, error-handling patterns, and the security boundary between API Gateway and the backend. Choosing correctly avoids unnecessary compute and tight coupling.
 
 | Integration | Guidance |
 |---|---|
@@ -137,6 +147,8 @@ sequenceDiagram
 ## Logging and Monitoring
 
 Enable structured access logs with fields supported by the API type. At minimum capture request ID, extended request ID where available, route, status, response/integration latency, source IP, user agent, and authenticated principal/authorizer outcome without tokens or secrets.
+
+The right metrics let you distinguish gateway overhead from backend latency and detect anomalies before they impact users. Without these signals, troubleshooting becomes reactive and slow.
 
 | Signal | Operational use |
 |---|---|

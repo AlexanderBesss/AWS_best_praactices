@@ -1,8 +1,12 @@
 # CloudFront Best Practices
 
+A well-configured CDN is critical for delivering low-latency content to global audiences, reducing origin server load, and defending against traffic spikes and DDoS attacks. CloudFront extends AWS's edge network to over 400 locations, making it the backbone of performant, secure, and cost-effective content delivery.
+
 ## Distribution Configuration
 
 ### Origin Types
+
+Choosing the right origin determines security posture, failover behavior, and whether content stays within the AWS network.
 
 | Origin Type | Description | Use Case |
 |-------------|-------------|----------|
@@ -16,6 +20,8 @@
 
 ### Origin Access Control
 
+Restricting who can pull content from your origin prevents unauthorized access and hotlinking.
+
 | Method | Description | Recommendation |
 |--------|-------------|----------------|
 | **OAC (Origin Access Control)** | SigV4 signing for supported origin types; support and setup vary by origin | **Preferred for supported origins** |
@@ -28,6 +34,8 @@
 ## Cache Behavior
 
 ### Cache Settings
+
+Proper cache configuration directly impacts hit rates, origin load, and how quickly updates propagate to viewers.
 
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
@@ -44,6 +52,8 @@ If a cache policy has a minimum TTL greater than zero, CloudFront can cache for 
 
 ### Cache Key Optimization
 
+A minimal, well-scoped cache key maximizes hit ratios by ensuring equivalent requests share the same cached object.
+
 | Element | Forward? | When to Include |
 |---------|----------|----------------|
 | **Distribution domain and URL path** | Always | Default cache key components |
@@ -58,6 +68,8 @@ If a cache policy has a minimum TTL greater than zero, CloudFront can cache for 
 
 ### Compression
 
+Enabling compression reduces payload sizes for text-based content, lowering transfer costs and improving load times.
+
 | Setting | Recommendation |
 |---------|---------------|
 | **Compress automatically** | Enable for text-based content |
@@ -65,6 +77,8 @@ If a cache policy has a minimum TTL greater than zero, CloudFront can cache for 
 | **Origin compression** | Enable if origin supports it |
 
 ### HTTP Settings
+
+Modern transport protocols and TLS baselines improve connection efficiency, reduce latency, and block legacy cipher attacks.
 
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
@@ -75,6 +89,8 @@ If a cache policy has a minimum TTL greater than zero, CloudFront can cache for 
 | **Minimum protocol** | TLSv1.2 | Drop TLS 1.0/1.1 |
 
 ### Field-Level Encryption
+
+Encrypting sensitive fields end-to-end keeps PCI-regulated data protected in transit without requiring full-body encryption at every layer.
 
 | Feature | Description | Use Case |
 |---------|-------------|----------|
@@ -89,6 +105,8 @@ If a cache policy has a minimum TTL greater than zero, CloudFront can cache for 
 
 ### Origin Shield Configuration
 
+An intermediate caching layer between edge locations and the origin absorbs traffic surges and reduces duplicate origin fetches.
+
 | Setting | Recommendation |
 |---------|---------------|
 | **Enable Origin Shield** | For high-traffic distributions |
@@ -97,6 +115,8 @@ If a cache policy has a minimum TTL greater than zero, CloudFront can cache for 
 | **Cost** | Additional Origin Shield request charges and potentially data-transfer charges; model by Region and origin |
 
 ### Benefits
+
+Origin Shield consolidates cache misses into a single regional hop, which measurably reduces origin load and improves tail-latency responses.
 
 | Benefit | Description |
 |---------|-------------|
@@ -135,6 +155,8 @@ sequenceDiagram
 
 ### WAF Integration
 
+Attaching WAF rules at the edge blocks malicious requests before they reach the origin, reducing attack surface and processing cost.
+
 | Feature | Description |
 |---------|-------------|
 | **AWS WAF** | Web Application Firewall |
@@ -144,6 +166,8 @@ sequenceDiagram
 | **Geo-match** | Country-based blocking |
 
 ### Security Headers
+
+Response headers instruct browsers to enforce security policies that mitigate common client-side attacks.
 
 | Header | Value | Purpose |
 |--------|-------|---------|
@@ -155,6 +179,8 @@ sequenceDiagram
 | Referrer-Policy | strict-origin-when-cross-origin | Referrer control |
 
 ### Response Headers Policy
+
+A response-headers policy centralizes header injection so security controls are applied consistently across all cache behaviors.
 
 | Header | Recommendation |
 |--------|---------------|
@@ -170,6 +196,8 @@ sequenceDiagram
 
 ### Lambda@Edge vs CloudFront Functions
 
+Picking the right compute option balances execution power, cold-start latency, and per-invocation cost.
+
 | Feature | Lambda@Edge | CloudFront Functions |
 |---------|-------------|---------------------|
 | **Runtime** | Supported Node.js and Python Lambda runtimes | CloudFront JavaScript runtime |
@@ -182,6 +210,8 @@ sequenceDiagram
 | **Key-value data** | No CloudFront KeyValueStore integration | CloudFront KeyValueStore is available with supported JavaScript runtime versions |
 
 ### Use Cases
+
+Each event type in the CloudFront request-response lifecycle offers a distinct hook for request or response manipulation.
 
 | Function Type | Use Case | Example |
 |--------------|----------|---------|
@@ -216,6 +246,8 @@ flowchart LR
 
 ### Key Metrics
 
+Tracking the right CloudFront metrics gives early warning of performance degradation, errors, and cost anomalies.
+
 | Metric | Description | Alert Threshold |
 |--------|-------------|----------------|
 | Requests | Total requests | Workload baseline/anomaly |
@@ -226,6 +258,8 @@ flowchart LR
 | Status/result types in access logs | Includes detailed outcomes such as client disconnects | Query logs; there is no dedicated standard `499 Errors` metric |
 
 ### Real-Time Logs
+
+Real-time and configurable logging enable rapid incident investigation and long-term traffic analysis.
 
 | Feature | Description |
 |---------|-------------|
@@ -238,6 +272,8 @@ flowchart LR
 
 ## Cost Optimization
 
+CloudFront costs scale with request volume, transfer distance, and feature usage, so optimization starts with cache efficiency.
+
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
 | **Increase cache hit rate** | Optimize cache keys, TTLs | Data transfer reduction |
@@ -248,6 +284,8 @@ flowchart LR
 | **Field-level encryption** | Only encrypt sensitive fields | Processing cost |
 
 ### Price Classes
+
+Selecting the narrowest price class that still covers your audience avoids paying for unused edge locations.
 
 | Class | Coverage | Regions | Cost |
 |-------|----------|---------|------|
@@ -262,6 +300,8 @@ CloudFront pricing varies by viewer geography, usage tier or flat-rate plan, req
 ---
 
 ## Cross-Service Integration
+
+CloudFront rarely operates in isolation; pairing it with the right AWS services creates a complete delivery and security pipeline.
 
 | Service | Integration | Purpose |
 |---------|------------|---------|

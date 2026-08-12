@@ -1,8 +1,12 @@
 # ECS/EKS Best Practices
 
+Container orchestration is the backbone of modern cloud-native infrastructure, enabling automated deployment, scaling, and management of containerized workloads at scale. Choosing the right orchestrator on AWS directly impacts operational complexity, cost efficiency, and your team's ability to respond to changing demand. This guide covers the key decisions and patterns for ECS and EKS so you can match infrastructure to workload requirements.
+
 ## ECS vs EKS Selection
 
 ### Comparison
+
+The table below contrasts core capabilities so you can match each service to your team's expertise and architectural constraints.
 
 | Feature | ECS | EKS |
 |---------|-----|-----|
@@ -18,6 +22,8 @@
 | **Best for** | AWS-centric teams that want a simpler orchestrator | Teams that require Kubernetes APIs and ecosystem |
 
 ### Recommendation Matrix
+
+Use this matrix to quickly narrow your choice based on the requirements that matter most to your project.
 
 | Requirement | Recommended |
 |-------------|-------------|
@@ -69,6 +75,8 @@ graph TB
 
 ### Launch Types
 
+Selecting the right launch type determines how much infrastructure you manage versus how much AWS handles for you.
+
 | Type | Description | Use Case |
 |------|-------------|----------|
 | **EC2 launch type** | ECS tasks run on EC2 container instances you manage | Specialized instances, host access, or capacity commitments |
@@ -78,6 +86,8 @@ graph TB
 
 ### Networking Modes
 
+The networking mode dictates how tasks communicate, which security controls apply, and whether tasks share or isolate network resources.
+
 | Mode | Description | Use Case |
 |------|-------------|----------|
 | **awsvpc** | Task gets ENI, own IP | **Recommended**, security groups |
@@ -85,6 +95,8 @@ graph TB
 | **Host** | Host network stack | Performance, legacy apps |
 
 ### Capacity Providers
+
+Capacity providers define where and how ECS provisions the underlying compute, balancing cost, reliability, and operational effort.
 
 | Type | Description | Use Case |
 |------|-------------|----------|
@@ -99,6 +111,8 @@ graph TB
 
 ### Node Groups
 
+Node group type determines how much of the underlying EC2 fleet AWS manages and how much customization you retain.
+
 | Type | Description | Use Case |
 |------|-------------|----------|
 | **Managed Node Group** | AWS-managed EC2 nodes | Standard workloads |
@@ -109,6 +123,8 @@ graph TB
 
 ### Kubernetes Version Support
 
+Understanding the version lifecycle is essential to avoid unexpected upgrade pressure and extended-support charges.
+
 | Support Tier | Duration | Coverage |
 |--------------|----------|----------|
 | **Standard support** | 14 months from release | Control plane, EKS-published AMIs, add-ons |
@@ -117,6 +133,8 @@ graph TB
 Upgrade clusters before standard support ends to avoid the extended-support surcharge. If extended support is disabled, EKS automatically upgrades the control plane when standard support ends; after extended support ends, EKS also automatically upgrades unsupported control planes.
 
 ### Node/Cluster Autoscaling
+
+Choosing the right autoscaling tool affects how quickly your cluster responds to demand changes and how much tuning you must maintain.
 
 | Tool | Approach | Recommendation |
 |------|----------|----------------|
@@ -131,11 +149,15 @@ Upgrade clusters before standard support ends to avoid the extended-support surc
 | **Disruption settings** | Tune consolidation, PodDisruptionBudgets, and termination grace periods together |
 | **Spot instances** | Mix with on-demand for resilience |
 
+These settings establish the operational guardrails for how your cluster scales under load and during consolidation.
+
 ---
 
 ## Auto-Scaling
 
 ### ECS Scaling
+
+The strategy you choose determines how ECS reacts to metric changes and whether scaling is reactive, predictive, or custom-driven.
 
 | Strategy | Description | Use Case |
 |----------|-------------|----------|
@@ -146,6 +168,8 @@ Upgrade clusters before standard support ends to avoid the extended-support surc
 
 ### EKS Scaling
 
+EKS offers multiple scaling dimensions—pods, nodes, and event-driven capacity—each addressing a different bottleneck.
+
 | Strategy | Description | Use Case |
 |----------|-------------|----------|
 | **HPA (Horizontal Pod Autoscaler)** | Pod count based on metrics | CPU, memory, custom |
@@ -155,6 +179,8 @@ Upgrade clusters before standard support ends to avoid the extended-support surc
 | **KEDA** | Event-driven autoscaling | Queue length, events |
 
 ### Scaling Metrics
+
+Picking the right metric ensures your scaling decisions reflect actual workload pressure rather than noisy or misleading signals.
 
 | Metric | Source | Use Case |
 |--------|--------|----------|
@@ -183,7 +209,11 @@ The following inventory is retained only to help teams identify existing App Mes
 | **Virtual Gateway** | Ingress/egress gateway |
 | **Envoy Proxy** | Sidecar proxy for each task/pod |
 
+These components define the building blocks teams will encounter when identifying existing App Mesh resources for migration.
+
 ### Legacy capabilities to map during migration
+
+Map these capabilities to replacement solutions so no traffic-management or resilience feature is lost during the transition away from App Mesh.
 
 | Feature | Description | Use Case |
 |---------|-------------|----------|
@@ -230,6 +260,8 @@ graph TB
 
 ### ECS Security
 
+Layered security controls reduce the blast radius of a compromised task and limit what each workload can access.
+
 | Control | Implementation |
 |---------|---------------|
 | **Task IAM roles** | Least privilege per task |
@@ -241,6 +273,8 @@ graph TB
 | **Encryption** | EFS encrypted, secrets encrypted |
 
 ### EKS Security
+
+EKS security spans IAM, network policies, pod standards, and secret management to defend the control plane and workloads.
 
 | Control | Implementation |
 |---------|---------------|
@@ -259,6 +293,8 @@ graph TB
 
 ### Logging Drivers
 
+The logging driver determines where container stdout/stderr and application logs flow, shaping both observability and cost.
+
 | Driver | Description | Use Case |
 |--------|-------------|----------|
 | **awslogs** | CloudWatch Logs | Simple AWS-native delivery |
@@ -266,6 +302,8 @@ graph TB
 | **splunk** | Direct to Splunk | Splunk integration |
 
 ### Log Management
+
+Good log management practices ensure logs are findable, retained for the right duration, and cost-efficient to store.
 
 | Practice | Description |
 |----------|-------------|
@@ -280,6 +318,8 @@ graph TB
 ## Monitoring
 
 ### Container Insights
+
+These metrics provide the earliest signals of resource pressure, unhealthy tasks, and deployment failures across both ECS and EKS.
 
 | Metric | Description | Alert |
 |--------|-------------|-------|
@@ -301,9 +341,13 @@ Prefer OpenTelemetry/ADOT for new instrumentation. X-Ray SDKs and the X-Ray daem
 | **Latency analysis** | Identify slow services |
 | **Error tracking** | Track exceptions and errors |
 
+Distributed tracing turns scattered logs into a request-level view, making it possible to pinpoint latency and failures across service boundaries.
+
 ---
 
 ## Cost Optimization
+
+Container costs are driven by compute choices, image efficiency, and idle resources; the strategies below target each lever.
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
@@ -319,6 +363,8 @@ Prefer OpenTelemetry/ADOT for new instrumentation. X-Ray SDKs and the X-Ray daem
 ---
 
 ## Cross-Service Integration
+
+ECS and EKS rarely operate in isolation; these integrations connect containers to the broader AWS platform for networking, security, and observability.
 
 | Service | Integration | Purpose |
 |---------|------------|---------|

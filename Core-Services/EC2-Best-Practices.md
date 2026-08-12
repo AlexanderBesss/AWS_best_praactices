@@ -1,8 +1,12 @@
 # EC2 Best Practices
 
+EC2 provides the foundational compute layer for virtually every AWS workload, making its configuration a primary driver of cost, performance, and security across the entire account. Misconfigured instances are among the most common sources of cloud waste and vulnerability, so establishing disciplined practices here yields outsized returns.
+
 ## Instance Selection
 
 ### Instance Type Categories
+
+Choosing the right instance category aligns hardware capabilities with workload demands, preventing both performance bottlenecks and unnecessary spend.
 
 | Category | Prefix | Use Case | Examples |
 |----------|--------|----------|----------|
@@ -15,6 +19,8 @@
 
 ### Graviton and Nitro
 
+Leveraging Graviton and Nitro infrastructure unlocks significant cost and performance gains while reducing the software overhead that traditionally consumes instance resources.
+
 | Topic | Guidance |
 |-------|----------|
 | **AWS Graviton (arm64)** | Prefer Graviton-based instances (e.g., `m7g`, `c7g`, `r7g`, `t4g`) for supported workloads — typically better price-performance than equivalent `x86` instances; requires arm64-compatible AMIs/binaries |
@@ -22,6 +28,8 @@
 | **Nitro Enclaves** | Use for isolated, attestable compute environments to process highly sensitive data (e.g., PII, keys) |
 
 ### Right-Sizing Guidelines
+
+A systematic right-sizing process prevents the common trap of over-provisioning "just to be safe," which can quietly inflate monthly bills by 30-40%.
 
 | Step | Action | Tool |
 |------|--------|------|
@@ -35,6 +43,8 @@
 
 ## Purchasing Options
 
+Matching the purchasing model to your workload profile is the single largest lever for reducing EC2 costs, with savings ranging from zero to 90% depending on commitment and flexibility trade-offs.
+
 | Option | Commitment | Discount | Flexibility | Best For |
 |--------|-----------|----------|-------------|----------|
 | **On-Demand** | None | 0% | Full — stop, terminate, change anytime | Short-term, unpredictable workloads |
@@ -45,6 +55,8 @@
 | **Spot Instances** | None | Up to 90% | Low — can be interrupted | Fault-tolerant, flexible timing |
 
 ### Purchasing Decision Matrix
+
+This matrix maps common workload patterns to the optimal purchasing strategy, helping teams avoid over-committing on unpredictable workloads or under-committing on steady-state ones.
 
 | Workload Type | Recommended Option | Reason |
 |---------------|-------------------|--------|
@@ -81,6 +93,8 @@ flowchart TD
 
 ### IMDS (Instance Metadata Service)
 
+The instance metadata service is a frequent attack vector for credential theft, so hardening IMDS access is one of the highest-impact security controls for any EC2 deployment.
+
 | Setting | Value | Description |
 |---------|-------|-------------|
 | IMDS Version | **v2 only** | Require session-oriented IMDSv2 as defense in depth against several metadata-access attack paths |
@@ -88,6 +102,8 @@ flowchart TD
 | Token Requirement | **Required** | IMDSv2 requires session token |
 
 ### Security Checklist
+
+These controls address the most common EC2 misconfigurations identified in security audits, reducing the attack surface across identity, network, and data layers.
 
 | Area | Best Practice | Implementation |
 |------|--------------|----------------|
@@ -100,6 +116,8 @@ flowchart TD
 | **User Data** | Never store secrets in user data scripts | Use SSM Parameter Store / Secrets Manager |
 
 ### Security Group Rules
+
+Security groups function as a stateful firewall at the instance level, and overly permissive rules are the leading cause of unauthorized EC2 exposure in production environments.
 
 | Rule Type | Direction | Protocol | Best Practice |
 |-----------|-----------|----------|---------------|
@@ -115,6 +133,8 @@ flowchart TD
 
 ### EBS Volume Selection
 
+Storage bottlenecks are often invisible until they cause application timeouts, so selecting a volume type that matches the workload's I/O pattern is critical for both performance and cost efficiency.
+
 | Volume Type | Code | IOPS | Throughput | Use Case |
 |-------------|------|------|------------|----------|
 | **gp3** | `gp3` | Up to 80,000 (independently provisioned) | Up to 2,000 MiB/s | General-purpose SSD; limits depend on the attached instance and Region |
@@ -125,6 +145,8 @@ flowchart TD
 
 ### EBS Best Practices
 
+These practices address the most common storage-related performance and security gaps, particularly around encryption posture and legacy volume migration.
+
 | Practice | Description |
 |----------|-------------|
 | Evaluate **gp3** instead of gp2 | Independent IOPS/throughput scaling and typically lower baseline storage pricing; compare current Regional pricing and workload performance |
@@ -134,6 +156,8 @@ flowchart TD
 | Enable **default encryption** | Account-level setting for all new volumes |
 
 ### Network Optimization
+
+Network configuration directly impacts inter-instance latency, data transfer costs, and the ability to keep traffic off the public internet — all of which affect both performance and security.
 
 | Feature | Description | Recommendation |
 |---------|-------------|----------------|
@@ -148,6 +172,8 @@ flowchart TD
 
 ### Launch Configuration vs Launch Template
 
+Using launch templates instead of legacy launch configurations unlocks versioning, default selection, and compatibility with modern Auto Scaling features that launch configurations no longer support.
+
 | Feature | Launch Configuration | Launch Template |
 |---------|---------------------|-----------------|
 | Versioning | No | Yes |
@@ -156,6 +182,8 @@ flowchart TD
 | **Recommendation** | **Legacy; migrate existing Auto Scaling groups** | **Use launch templates for new and updated workloads** |
 
 ### Auto Scaling Group Settings
+
+Misconfigured ASG boundaries and health checks are a leading cause of either failed scale-out events or unnecessary instance churn, so these parameters require careful calibration against actual application behavior.
 
 | Parameter | Recommendation | Reason |
 |-----------|---------------|--------|
@@ -168,6 +196,8 @@ flowchart TD
 | Health Check Grace Period | Measure application bootstrap time | Avoid replacing a healthy instance before startup completes |
 
 ### Scaling Policies
+
+Selecting the wrong scaling policy leads to either sluggish response to traffic spikes or aggressive flapping that wastes money and degrades user experience.
 
 | Policy Type | Description | Best For |
 |-------------|-------------|----------|
@@ -200,6 +230,8 @@ flowchart LR
 
 ### Instance State Management
 
+Understanding the data persistence implications of each action prevents accidental data loss and ensures the right recovery strategy is applied for each scenario.
+
 | Action | When to Use | Considerations |
 |--------|-------------|----------------|
 | **Stop/Start** | Maintenance, cost saving | Data on EBS preserved; instance store (ephemeral) data is LOST |
@@ -208,6 +240,8 @@ flowchart LR
 | **Reboot** | Application recovery | Faster than stop/start |
 
 ### AMI Management
+
+Stale AMIs accumulate unpatched vulnerabilities and unnecessary storage costs, while inconsistent base images cause configuration drift across environments.
 
 | Practice | Description |
 |----------|-------------|
@@ -223,6 +257,8 @@ flowchart LR
 
 ### Key CloudWatch Metrics
 
+These metrics are the earliest signals of capacity problems, security incidents, and cost anomalies, making them essential for any operational runbook.
+
 | Metric | Threshold | Action |
 |--------|-----------|--------|
 | `CPUUtilization` | Workload-specific SLO/headroom threshold | Correlate with latency, queue depth, throttling, and scaling metrics before changing size |
@@ -234,6 +270,8 @@ flowchart LR
 ---
 
 ## Cross-Service Integration
+
+EC2 rarely operates in isolation; integrating it with the right AWS services automates routine operations, closes security gaps, and reduces the manual effort required to maintain a healthy fleet.
 
 | Service | Integration | Purpose |
 |---------|------------|---------|

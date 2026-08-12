@@ -1,8 +1,12 @@
 # IAM Best Practices
 
+IAM is the foundation of AWS security, controlling who can access your resources and what actions they can perform. Without proper IAM configuration, a single compromised credential can lead to full account takeover, data breaches, and excessive costs. Implementing these practices ensures defense-in-depth across all accounts and workloads.
+
 ## Core Principles
 
 ### Least Privilege Framework
+
+Over-provisioned permissions are the most common path to account compromise. This framework ensures every identity has only the access it genuinely needs.
 
 | Principle | Description | Implementation |
 |-----------|-------------|----------------|
@@ -29,6 +33,8 @@ graph LR
 
 ### Permission Strategy
 
+Choosing the right identity type reduces long-term credential risk and simplifies access management.
+
 | Entity Type | Use Case | Best Practice |
 |-------------|----------|---------------|
 | **IAM Users** | Exceptional human or workload cases requiring long-term credentials | Prefer IAM Identity Center or federation for people and IAM roles/temporary credentials for workloads |
@@ -42,6 +48,8 @@ graph LR
 
 ### MFA Requirements
 
+MFA is the single most effective control against credential theft. Even with stolen passwords, attackers cannot bypass a properly enforced second factor.
+
 | Scope | Requirement | Implementation |
 |-------|-------------|----------------|
 | **Root user** | **AWS-required** | Register a passkey/security key where possible; all standalone, management, and member account root users must configure MFA unless member root credentials are centrally removed |
@@ -51,6 +59,8 @@ graph LR
 | **Service Roles** | Not required | EC2, Lambda, etc. use role assumption |
 
 ### MFA Condition Keys
+
+These keys let you enforce MFA at the policy level, ensuring sensitive operations require re-authentication.
 
 | Condition Key | Description | Example |
 |--------------|-------------|---------|
@@ -63,6 +73,8 @@ graph LR
 
 ### Trust Policies
 
+Trust policies define who can assume a role. Overly permissive trust policies are a primary vector for cross-account attacks and privilege escalation.
+
 | Trusted Entity | Use Case | Example |
 |---------------|----------|---------|
 | **AWS Service** | EC2, Lambda, ECS assume role | Service: ec2.amazonaws.com |
@@ -72,6 +84,8 @@ graph LR
 | **Federated User** | SAML/OIDC identity providers | Federated: arn:aws:iam::account:saml-provider/Provider |
 
 ### Session Duration
+
+Longer sessions increase the window of exposure if credentials are compromised. Matching session length to actual need limits blast radius.
 
 | Session | Default | Configurable Range / Limit | Recommendation |
 |---------|---------|----------------------------|----------------|
@@ -87,6 +101,8 @@ Do not treat all temporary credentials as having the same lifetime. Other STS op
 
 ### Policy Structure
 
+Well-structured policies are easier to audit, maintain, and reason about during incident response.
+
 | Element | Description | Best Practice |
 |---------|-------------|---------------|
 | **Action** | API operations allowed | Use specific actions, not wildcard |
@@ -96,6 +112,8 @@ Do not treat all temporary credentials as having the same lifetime. Other STS op
 | **Sid** | Statement identifier | Descriptive names for auditing |
 
 ### Common Condition Keys
+
+Conditions narrow the scope of permissions beyond simple allow/deny, adding critical context-aware security controls.
 
 | Condition Key | Example operator | Use Case |
 |--------------|------|----------|
@@ -108,6 +126,8 @@ Do not treat all temporary credentials as having the same lifetime. Other STS op
 | aws:TokenIssueTime | DateGreaterThan / DateLessThan | Constrain access by when temporary credentials were issued |
 
 ### Guardrail Policies
+
+These deny policies protect against common catastrophic mistakes and compliance violations that happen at scale.
 
 | Policy Name | Purpose | Description |
 |-------------|---------|-------------|
@@ -123,6 +143,8 @@ Do not treat all temporary credentials as having the same lifetime. Other STS op
 
 ### Comparison: IAM Users vs Identity Center
 
+IAM Users accumulate stale permissions and lack centralized lifecycle management. Identity Center solves these problems at scale.
+
 | Feature | IAM Users | IAM Identity Center |
 |---------|-----------|--------------------------|
 | **Password Management** | Per-user, manual | Centralized, SSO |
@@ -134,6 +156,8 @@ Do not treat all temporary credentials as having the same lifetime. Other STS op
 | **Recommendation** | **Avoid for humans** | **Use for all human access** |
 
 ### Permission Sets
+
+Permission sets provide reusable, centrally managed access definitions that simplify multi-account governance.
 
 | Concept | Description |
 |---------|-------------|
@@ -149,6 +173,8 @@ Do not treat all temporary credentials as having the same lifetime. Other STS op
 
 ### Service-Linked Roles
 
+Service-linked roles are managed by AWS services and carry fixed trust policies. Understanding them prevents unexpected permission gaps and audit confusion.
+
 | Service | Role Purpose | Auto-Created |
 |---------|-------------|--------------|
 | **Auto Scaling** | Manage EC2 instances | Yes |
@@ -158,6 +184,8 @@ Do not treat all temporary credentials as having the same lifetime. Other STS op
 | **CloudFormation** | Uses caller credentials or a user-supplied service role; some features use service-linked roles | Not a general auto-created execution role |
 
 ### Cross-Account Access Patterns
+
+Multi-account architectures require secure cross-account communication. These patterns prevent lateral movement while enabling legitimate access.
 
 | Pattern | Description | Use Case |
 |---------|-------------|----------|
@@ -186,6 +214,8 @@ graph LR
 
 ### Credential Types
 
+Long-lived credentials are the highest risk in any AWS account. Understanding credential lifetimes helps you minimize exposure windows.
+
 | Type | Lifetime | Use Case | Rotation |
 |------|----------|----------|----------|
 | **Access Keys** | Long-lived until deactivated/deleted | Exceptional workloads outside AWS that cannot federate | Replace with temporary credentials; otherwise rotate on a risk-based schedule and immediately after exposure |
@@ -194,6 +224,8 @@ graph LR
 | **Web Identity Tokens** | Provider-dependent | Mobile/web apps | Auto-expire |
 
 ### Credential Rotation Checklist
+
+Stale credentials are the most overlooked security gap. Regular rotation and cleanup prevent dormant access from becoming a breach vector.
 
 | Action | Frequency | Tool |
 |--------|-----------|------|
@@ -211,6 +243,8 @@ SCPs set the maximum available permissions for principals in member accounts; th
 
 ### SCP Types
 
+Understanding the difference between allow and deny SCPs is critical for designing effective organizational guardrails without over-restricting workloads.
+
 | Type | Description | Use Case |
 |------|-------------|----------|
 | **Allow List SCP** | Explicitly allow specific services/actions | Restrict to approved services only |
@@ -218,6 +252,8 @@ SCPs set the maximum available permissions for principals in member accounts; th
 | **Baseline SCP** | Applied to all accounts | Organization-wide guardrails |
 
 ### Common SCP Patterns
+
+These patterns represent the most frequently needed organizational guardrails, preventing the highest-impact mistakes across all member accounts.
 
 | SCP | Purpose | Actions Affected |
 |-----|---------|-----------------|
@@ -231,6 +267,8 @@ SCPs set the maximum available permissions for principals in member accounts; th
 
 ## Monitoring & Auditing
 
+Without continuous monitoring, misconfigurations and unauthorized changes go undetected until they cause a breach. These tools provide the visibility needed to catch issues early.
+
 | Tool | Purpose | Frequency |
 |------|---------|-----------|
 | **CloudTrail** | API call logging | Continuous |
@@ -240,6 +278,8 @@ SCPs set the maximum available permissions for principals in member accounts; th
 | **AWS Config Rules** | IAM policy compliance | Continuous |
 
 ### Key CloudTrail Events to Monitor
+
+These events signal the most dangerous IAM changes and should trigger immediate alerts to enable rapid incident response.
 
 | Event | Concern | Action |
 |-------|---------|--------|

@@ -1,8 +1,12 @@
 # Load Balancing Best Practices
 
+Load balancing is a foundational capability for building resilient, highly available, and scalable applications on AWS. By distributing incoming traffic across multiple targets, load balancers eliminate single points of failure, improve response times, and enable seamless horizontal scaling. Proper load balancer configuration directly impacts application reliability, security posture, and cost efficiency.
+
 ## Load Balancer Types
 
 ### Comparison
+
+Choosing the right load balancer type depends on your traffic protocol, routing needs, and performance requirements. The following comparison highlights the key differences to guide your selection.
 
 | Feature | Application LB (ALB) | Network LB (NLB) | Gateway LB (GWLB) | Classic LB (CLB) |
 |---------|---------------------|-----------------|-------------------|-----------------|
@@ -19,6 +23,8 @@
 | **Status** | **Current generation** | **Current generation** | **Current generation** | **Previous generation; migrate where practical** |
 
 ### Selection Matrix
+
+This matrix maps common application requirements to the most suitable load balancer type, helping you quickly narrow down your choice.
 
 | Requirement | Recommended LB |
 |-------------|---------------|
@@ -53,6 +59,8 @@ flowchart TD
 
 ### Target Types
 
+Selecting the correct target type determines which resources your load balancer can route traffic to and how it manages connections. Understanding these options is essential for designing flexible backend architectures.
+
 | Type | Description | Use Case |
 |------|-------------|----------|
 | **instance** | EC2 instance ID | ALB, NLB, GWLB |
@@ -61,6 +69,8 @@ flowchart TD
 | **alb** | One Application Load Balancer in the same VPC/account | NLB only, for static IP/PrivateLink plus ALB layer-7 features |
 
 ### Target Group Configuration
+
+Proper target group configuration ensures traffic reaches healthy backends efficiently while maintaining application-specific behavior.
 
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
@@ -99,6 +109,8 @@ flowchart LR
 
 ### Health Check Configuration
 
+Health checks are the mechanism by which load balancers determine whether targets can receive traffic. Correct configuration balances fast failure detection against the risk of false positives and unnecessary load.
+
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
 | **Protocol** | Match target protocol | HTTP for web, TCP for raw |
@@ -109,6 +121,8 @@ flowchart LR
 | **Success codes** | 200, 204, or custom | Match application responses |
 
 ### Health Check Best Practices
+
+These practices ensure health checks accurately reflect application state without introducing instability or cascading failures.
 
 | Practice | Description |
 |----------|-------------|
@@ -124,6 +138,8 @@ flowchart LR
 
 ### Listener Configuration
 
+Listener settings control how the load balancer accepts and processes incoming connections. Proper SSL/TLS configuration is critical for security compliance and cryptographic performance.
+
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
 | **Security policy** | Select a current predefined ELB policy that meets client compatibility and compliance requirements | Modern protocols and ciphers |
@@ -133,6 +149,8 @@ flowchart LR
 | **Private certificate** | For internal services | Internal PKI |
 
 ### SSL Policies
+
+SSL policies define the TLS versions and cipher suites your load balancer supports. Selecting the right policy balances security strength with client compatibility.
 
 | Policy | TLS Versions | Use Case |
 |--------|-------------|----------|
@@ -147,6 +165,8 @@ flowchart LR
 
 ### ALB Routing
 
+ALB routing rules enable content-based traffic distribution, allowing a single load balancer to serve multiple services or versions based on request attributes.
+
 | Rule Type | Description | Example |
 |-----------|-------------|---------|
 | **Host-based** | Route by hostname | api.example.com to API |
@@ -156,6 +176,8 @@ flowchart LR
 | **HTTP method** | Route by method | POST to write backend |
 
 ### Sticky Sessions
+
+Sticky sessions bind a client to a specific target for a duration. They should be used sparingly since they reduce load distribution effectiveness and complicate scaling.
 
 | Setting | Recommendation |
 |---------|---------------|
@@ -170,6 +192,8 @@ flowchart LR
 
 ### Integration Settings
 
+Integrating load balancers with Auto Scaling enables automatic capacity adjustment based on real-time demand, ensuring availability while controlling costs.
+
 | Setting | Recommendation | Reason |
 |---------|---------------|--------|
 | **Target tracking** | CPU, request count, or custom | Automatic scaling |
@@ -179,6 +203,8 @@ flowchart LR
 | **Health-check grace period** | Set from measured startup and target-registration time, not a universal fixed value | Avoid replacing instances before they can become healthy |
 
 ### Observability Metrics
+
+These load balancer-specific metrics provide actionable signals for scaling decisions, SLO monitoring, and failure diagnosis.
 
 | Metric | Description | Use Case |
 |--------|-------------|----------|
@@ -193,6 +219,8 @@ flowchart LR
 
 ### Key Metrics
 
+Monitoring these metrics with defined warning and critical thresholds enables proactive incident response and capacity planning.
+
 | Metric | Warning | Critical | Description |
 |--------|---------|----------|-------------|
 | ELB/target 5XX rates | Above normal but within error budget | SLO/error-budget breach | Separate LB-generated and target-generated errors |
@@ -205,6 +233,8 @@ flowchart LR
 
 ### Access Logs
 
+Access logs provide a detailed record of every request processed by the load balancer, supporting security audits, troubleshooting, and compliance requirements.
+
 | Setting | Recommendation |
 |---------|---------------|
 | **Enable access logs** | ALB logs HTTP requests; NLB access logs apply to TLS listeners; use VPC Flow Logs and service metrics where LB access logs do not cover the traffic |
@@ -216,6 +246,8 @@ flowchart LR
 ---
 
 ## Cost Optimization
+
+Load balancer costs scale with traffic volume, capacity utilization, and feature usage. Applying these strategies helps align spending with actual demand.
 
 | Strategy | Description | Potential Savings |
 |----------|-------------|-------------------|
@@ -234,6 +266,8 @@ ALB, NLB, and GWLB capacity-unit formulas use different dimensions, and allowanc
 
 ## Cross-Zone Load Balancing
 
+Cross-zone load balancing controls whether traffic is distributed evenly across targets in all Availability Zones or only within the same zone. The default behavior and cost implications differ by load balancer type.
+
 | Setting | ALB | NLB | CLB |
 |---------|-----|-----|-----|
 | **Load-balancer-level default** | Enabled and cannot be disabled at this level | Disabled | Depends on creation method (console versus API/CLI) |
@@ -244,6 +278,8 @@ ALB, NLB, and GWLB capacity-unit formulas use different dimensions, and allowanc
 ---
 
 ## Cross-Service Integration
+
+Load balancers integrate with multiple AWS services to form a complete traffic management, security, and observability stack. Understanding these integrations enables cohesive architecture design.
 
 | Service | Integration | Purpose |
 |---------|------------|---------|
