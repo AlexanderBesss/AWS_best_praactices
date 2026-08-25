@@ -14,6 +14,7 @@ A curated, structured reference guide covering commonly used AWS services and ar
 ## Table of Contents
 
 ### Core Services
+
 | Document | Description |
 |----------|-------------|
 | [EC2 Best Practices](Core-Services/EC2-Best-Practices.md) | Compute optimization, instance selection, security hardening, and lifecycle management |
@@ -22,6 +23,7 @@ A curated, structured reference guide covering commonly used AWS services and ar
 | [VPC Best Practices](Core-Services/VPC-Best-Practices.md) | Network architecture, subnet design, security groups, NACLs, and peering strategies |
 
 ### Database
+
 | Document | Description |
 |----------|-------------|
 | [RDS Best Practices](Database/RDS-Best-Practices.md) | Relational database provisioning, backups, scaling, multi-AZ, and engine selection |
@@ -29,6 +31,7 @@ A curated, structured reference guide covering commonly used AWS services and ar
 | [ElastiCache Best Practices](Database/ElastiCache-Best-Practices.md) | Caching strategies, Redis vs Memcached, clustering, failover, and data consistency |
 
 ### Architecture Design Patterns
+
 | Document | Description |
 |----------|-------------|
 | [Event-Driven Patterns](Design/01-event-driven-patterns.md) | Lambda + SNS + SQS patterns: pub-sub fan-out, work queues, FIFO pipelines, async invocation, DLQ strategies |
@@ -42,6 +45,7 @@ A curated, structured reference guide covering commonly used AWS services and ar
 | [Multi-Account & Landing Zone Patterns](Design/09-multi-account-landing-zone-patterns.md) | Organizations, Control Tower, centralized networking/logging, and cross-account access |
 
 ### Serverless
+
 | Document | Description |
 |----------|-------------|
 | [Lambda Best Practices](Serverless/Lambda-Best-Practices.md) | Function design, cold starts, memory sizing, timeouts, and error handling |
@@ -49,6 +53,7 @@ A curated, structured reference guide covering commonly used AWS services and ar
 | [EventBridge Best Practices](Serverless/EventBridge-Best-Practices.md) | Event-driven architecture, bus design, rule patterns, and error handling |
 
 ### Networking
+
 | Document | Description |
 |----------|-------------|
 | [CloudFront Best Practices](Networking/CloudFront-Best-Practices.md) | CDN configuration, cache behavior, origin shielding, and security |
@@ -56,6 +61,7 @@ A curated, structured reference guide covering commonly used AWS services and ar
 | [Load Balancing Best Practices](Networking/Load-Balancing-Best-Practices.md) | ALB/NLB/GWLB selection, target groups, health checks, and TLS termination |
 
 ### DevOps
+
 | Document | Description |
 |----------|-------------|
 | [CI/CD Best Practices](DevOps/CI-CD-Best-Practices.md) | CodePipeline, CodeBuild, deployment strategies, and environment promotion |
@@ -63,12 +69,14 @@ A curated, structured reference guide covering commonly used AWS services and ar
 | [ECS/EKS Best Practices](DevOps/ECS-EKS-Best-Practices.md) | Container orchestration, auto-scaling, service mesh, and cluster management |
 
 ### Monitoring
+
 | Document | Description |
 |----------|-------------|
 | [CloudWatch Best Practices](Monitoring/CloudWatch-Best-Practices.md) | Metrics, alarms, dashboards, log insights, and synthetic canaries |
 | [X-Ray Best Practices](Monitoring/X-Ray-Best-Practices.md) | Distributed tracing, service maps, latency analysis, and error tracking |
 
 ### Security
+
 | Document | Description |
 |----------|-------------|
 | [WAF Best Practices](Security/WAF-Best-Practices.md) | Web ACL rules, rate limiting, bot management, and managed rule groups |
@@ -76,6 +84,7 @@ A curated, structured reference guide covering commonly used AWS services and ar
 | [Shield Best Practices](Security/Shield-Best-Practices.md) | DDoS protection, traffic mitigation, attack response, and cost considerations |
 
 ### Cost Optimization
+
 | Document | Description |
 |----------|-------------|
 | [Cost Optimization Guide](Cost-Optimization/Cost-Optimization.md) | Reserved Instances, Savings Plans, right-sizing, tagging, and budgeting |
