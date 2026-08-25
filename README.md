@@ -1,3 +1,8 @@
+---
+title: AWS Best Practices Documentation
+permalink: /
+---
+
 # AWS Best Practices Documentation
 
 A curated, structured reference guide covering commonly used AWS services and architecture patterns. It is not an exhaustive catalog of AWS services.
@@ -153,3 +158,18 @@ graph LR
     CostOptimization -.-> Sustainability
     OperationalExcellence -.-> PerformanceEfficiency
 ```
+
+---
+
+## Deploying the Documentation Site
+
+The repository includes a GitHub Pages workflow at `.github/workflows/pages.yml`. It builds the Markdown with Jekyll and deploys the result whenever a commit is pushed to `main`.
+
+To enable the first deployment:
+
+1. Push these files to GitHub.
+2. Open **Settings → Pages** in the repository.
+3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+4. Open **Actions** and follow the **Deploy documentation to GitHub Pages** run.
+
+For the current repository name, the default site URL will be `https://alexanderbesss.github.io/AWS_best_praactices/`. GitHub will also show the final URL in the deployment summary.

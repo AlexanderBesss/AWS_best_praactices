@@ -1,3 +1,7 @@
+---
+title: High-Availability & Disaster Recovery Patterns
+---
+
 # High-Availability & Disaster Recovery Patterns
 
 ## Overview

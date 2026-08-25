@@ -1,3 +1,7 @@
+---
+title: Route 53 Best Practices
+---
+
 # Route 53 Best Practices
 
 A well-designed DNS strategy is the foundation of reliable, performant, and secure service delivery. Because DNS sits at the entry point of every request, the choices you make around routing, health evaluation, and resilience directly affect availability, latency, and the user experience.

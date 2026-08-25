@@ -1,3 +1,7 @@
+---
+title: Serverless Communication Patterns
+---
+
 # Serverless Communication Patterns
 
 ## Overview

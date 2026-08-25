@@ -1,3 +1,7 @@
+---
+title: Cost Optimization Guide
+---
+
 # Cost Optimization Guide
 
 Cloud spend grows predictably when workloads scale without deliberate cost controls. Without a structured optimization strategy, organizations routinely overpay by 30-60% through idle resources, misconfigured services, and missed commitment discounts. This guide provides actionable patterns to identify waste, right-size infrastructure, and negotiate better pricing — turning cost management into a competitive advantage rather than a reactive fire drill.

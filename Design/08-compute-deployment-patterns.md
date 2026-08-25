@@ -1,3 +1,7 @@
+---
+title: Compute & Deployment Patterns
+---
+
 # Compute & Deployment Patterns
 
 ## Overview

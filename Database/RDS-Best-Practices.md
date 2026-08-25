@@ -1,3 +1,7 @@
+---
+title: RDS Best Practices
+---
+
 # RDS Best Practices
 
 RDS is AWS's managed relational database service, handling the operational overhead of provisioning, patching, and scaling so teams can focus on application logic. Choosing the right engine, sizing, and configuration directly impacts performance, cost, and resilience — making these decisions foundational to any cloud database architecture.

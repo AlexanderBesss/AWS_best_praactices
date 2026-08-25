@@ -1,3 +1,7 @@
+---
+title: AWS WAF Best Practices
+---
+
 # AWS WAF Best Practices
 
 AWS WAF inspects HTTP(S) requests sent to supported resources. It complements, but does not replace, secure application code, authentication, authorization, DDoS protection, and dependency-level rate controls.

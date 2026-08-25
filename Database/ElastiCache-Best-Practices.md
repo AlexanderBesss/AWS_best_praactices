@@ -1,3 +1,7 @@
+---
+title: ElastiCache Best Practices
+---
+
 # ElastiCache Best Practices
 
 ElastiCache is one of the most widely deployed AWS services because in-memory caching directly determines application latency, database load, and user experience under scale. Getting ElastiCache configuration wrong can cascade into source-database overload, slow responses, data inconsistency, and unexpected cost spikes. This guide distills the operational decisions that keep caches fast, reliable, and economical.

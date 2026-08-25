@@ -1,3 +1,7 @@
+---
+title: Amazon EventBridge Best Practices
+---
+
 # Amazon EventBridge Best Practices
 
 Amazon EventBridge routes events; it is not a durable work queue for consumers. Design producers and targets for at-least-once delivery, duplicates, retries, delayed delivery, and partial failure.

@@ -1,3 +1,7 @@
+---
+title: AWS Shield Best Practices
+---
+
 # AWS Shield Best Practices
 
 AWS Shield protects AWS-hosted applications from distributed denial-of-service (DDoS) attacks. Shield does not replace AWS WAF, resilient architecture, capacity planning, or an incident-response process.

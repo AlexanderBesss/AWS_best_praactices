@@ -1,3 +1,7 @@
+---
+title: S3 Best Practices
+---
+
 # S3 Best Practices
 
 Amazon S3 is the foundational object storage service for AWS, providing durable, scalable, and cost-effective storage for virtually any workload. Understanding S3's features and trade-offs is essential because storage decisions directly impact security posture, application performance, and cloud spend. This guide consolidates the most important considerations so teams can make informed choices rather than defaulting to the simplest option.

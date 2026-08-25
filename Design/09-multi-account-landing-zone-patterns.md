@@ -1,3 +1,7 @@
+---
+title: Multi-Account & Landing Zone Patterns
+---
+
 # Multi-Account & Landing Zone Patterns
 
 ## Overview

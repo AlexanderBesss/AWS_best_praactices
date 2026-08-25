@@ -1,3 +1,7 @@
+---
+title: EC2 Best Practices
+---
+
 # EC2 Best Practices
 
 EC2 provides the foundational compute layer for virtually every AWS workload, making its configuration a primary driver of cost, performance, and security across the entire account. Misconfigured instances are among the most common sources of cloud waste and vulnerability, so establishing disciplined practices here yields outsized returns.

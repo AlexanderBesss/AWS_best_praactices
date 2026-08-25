@@ -1,3 +1,7 @@
+---
+title: CloudFront Best Practices
+---
+
 # CloudFront Best Practices
 
 A well-configured CDN is critical for delivering low-latency content to global audiences, reducing origin server load, and defending against traffic spikes and DDoS attacks. CloudFront extends AWS's edge network to over 400 locations, making it the backbone of performant, secure, and cost-effective content delivery.

@@ -1,3 +1,7 @@
+---
+title: Error Handling & Resilience Patterns
+---
+
 # Error Handling & Resilience Patterns
 
 ## Overview

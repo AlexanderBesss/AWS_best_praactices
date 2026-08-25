@@ -1,3 +1,7 @@
+---
+title: CloudWatch Best Practices
+---
+
 # CloudWatch Best Practices
 
 Observability is the foundation of reliable cloud operations. Without it, incidents go undetected until users are impacted, mean-time-to-recovery balloons, and root-cause analysis becomes guesswork. CloudWatch provides the metrics, logs, and signals needed to detect, diagnose, and resolve issues before they affect business outcomes.

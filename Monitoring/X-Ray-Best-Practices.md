@@ -1,3 +1,7 @@
+---
+title: X-Ray Best Practices
+---
+
 # X-Ray Best Practices
 
 Distributed tracing is critical for modern microservice architectures because requests span multiple services, making it impossible to pinpoint latency, errors, or bottlenecks by examining individual components in isolation. By capturing the full lifecycle of a request across all downstream dependencies, tracing provides end-to-end visibility that enables faster root-cause analysis, informed capacity planning, and reliable SLO tracking.

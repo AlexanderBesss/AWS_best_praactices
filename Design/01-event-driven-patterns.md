@@ -1,3 +1,7 @@
+---
+title: Event-Driven Architecture Patterns
+---
+
 # Event-Driven Architecture Patterns
 
 ## Overview

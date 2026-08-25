@@ -1,3 +1,7 @@
+---
+title: AWS KMS Best Practices
+---
+
 # AWS KMS Best Practices
 
 AWS Key Management Service (AWS KMS) protects key material and performs cryptographic operations. A KMS key is not a general-purpose secret store: keep passwords, tokens, and similar values in AWS Secrets Manager or Systems Manager Parameter Store and use KMS to protect them.

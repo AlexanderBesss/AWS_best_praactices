@@ -1,3 +1,7 @@
+---
+title: IAM Best Practices
+---
+
 # IAM Best Practices
 
 IAM is the foundation of AWS security, controlling who can access your resources and what actions they can perform. Without proper IAM configuration, a single compromised credential can lead to full account takeover, data breaches, and excessive costs. Implementing these practices ensures defense-in-depth across all accounts and workloads.

@@ -1,3 +1,7 @@
+---
+title: CI/CD Best Practices
+---
+
 # CI/CD Best Practices
 
 CI/CD is the backbone of modern software delivery, enabling teams to ship changes quickly, safely, and reproducibly. Automating the build, test, and deployment pipeline reduces manual errors, accelerates feedback loops, and ensures every change is validated before reaching production.

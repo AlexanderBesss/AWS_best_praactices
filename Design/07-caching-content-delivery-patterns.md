@@ -1,3 +1,7 @@
+---
+title: Caching & Content Delivery Patterns
+---
+
 # Caching & Content Delivery Patterns
 
 ## Overview

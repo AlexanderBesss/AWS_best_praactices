@@ -1,3 +1,7 @@
+---
+title: AWS Lambda Best Practices
+---
+
 # AWS Lambda Best Practices
 
 Design Lambda functions as short-lived, stateless compute units while taking advantage of safe execution-environment reuse. Delivery semantics, retries, and failure destinations depend on the invocation source; there is no single Lambda retry policy for every trigger.

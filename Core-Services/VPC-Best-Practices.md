@@ -1,3 +1,7 @@
+---
+title: VPC Best Practices
+---
+
 # VPC Best Practices
 
 A VPC gives you an isolated, logically separated section of AWS where you control networking, IP addressing, and security boundaries. Proper VPC design is the foundation for secure, scalable, and cost-effective cloud infrastructure—everything else builds on top of it.

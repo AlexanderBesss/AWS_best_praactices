@@ -1,3 +1,7 @@
+---
+title: Amazon API Gateway Best Practices
+---
+
 # Amazon API Gateway Best Practices
 
 Choose an API type from required features and client behavior, then protect the backend with explicit authorization, validation, throttling, observability, and failure handling.

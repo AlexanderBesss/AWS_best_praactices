@@ -1,3 +1,7 @@
+---
+title: DynamoDB Best Practices
+---
+
 # DynamoDB Best Practices
 
 DynamoDB is AWS's fully managed serverless NoSQL database, purpose-built for applications that need single-digit millisecond latency at any scale. Because its performance, cost, and reliability depend heavily on how you model data and configure capacity, getting these decisions right early prevents expensive re-architecting later. The guidance below covers the patterns and settings that keep DynamoDB performant, secure, and cost-efficient in production.

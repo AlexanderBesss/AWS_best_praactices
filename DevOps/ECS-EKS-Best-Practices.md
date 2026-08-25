@@ -1,3 +1,7 @@
+---
+title: ECS/EKS Best Practices
+---
+
 # ECS/EKS Best Practices
 
 Container orchestration is the backbone of modern cloud-native infrastructure, enabling automated deployment, scaling, and management of containerized workloads at scale. Choosing the right orchestrator on AWS directly impacts operational complexity, cost efficiency, and your team's ability to respond to changing demand. This guide covers the key decisions and patterns for ECS and EKS so you can match infrastructure to workload requirements.

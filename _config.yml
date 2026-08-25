@@ -1,0 +1,28 @@
+title: AWS Best Practices
+description: Practical guidance for building secure, reliable, performant, and cost-effective workloads on AWS.
+repository_url: https://github.com/AlexanderBesss/AWS_best_praactices
+lang: en
+theme: null
+markdown: kramdown
+highlighter: rouge
+plugins:
+  - jekyll-relative-links
+  - jekyll-seo-tag
+
+relative_links:
+  enabled: true
+  collections: true
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+exclude:
+  - .claude
+  - opencode.json
+  - site
+  - vendor
+  - Gemfile
+  - Gemfile.lock

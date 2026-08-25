@@ -1,3 +1,7 @@
+---
+title: Cross-Cutting Architecture Patterns
+---
+
 # Cross-Cutting Architecture Patterns
 
 ## Overview

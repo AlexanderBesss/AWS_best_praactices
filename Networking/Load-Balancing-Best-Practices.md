@@ -1,3 +1,7 @@
+---
+title: Load Balancing Best Practices
+---
+
 # Load Balancing Best Practices
 
 Load balancing is a foundational capability for building resilient, highly available, and scalable applications on AWS. By distributing incoming traffic across multiple targets, load balancers eliminate single points of failure, improve response times, and enable seamless horizontal scaling. Proper load balancer configuration directly impacts application reliability, security posture, and cost efficiency.

@@ -1,3 +1,7 @@
+---
+title: CloudFormation Best Practices
+---
+
 # CloudFormation Best Practices
 
 Infrastructure as Code transforms how AWS environments are provisioned, bringing repeatability, version control, and auditability to cloud deployments. CloudFormation eliminates manual console clicks, reduces human error, and ensures that every environment—development, staging, production—is built from the same verified blueprint.

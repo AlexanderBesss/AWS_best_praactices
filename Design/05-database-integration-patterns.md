@@ -1,3 +1,7 @@
+---
+title: Database Integration Patterns
+---
+
 # Database Integration Patterns
 
 ## Overview
