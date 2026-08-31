@@ -3,6 +3,8 @@ title: AWS Best Practices Documentation
 permalink: /
 ---
 
+[View on GitHub Pages](https://alexanderbesss.github.io/AWS_best_praactices/)
+
 # AWS Best Practices Documentation
 
 A curated, structured reference guide covering commonly used AWS services and architecture patterns. It is not an exhaustive catalog of AWS services.
