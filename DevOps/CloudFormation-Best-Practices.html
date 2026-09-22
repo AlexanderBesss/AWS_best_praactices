@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CloudFormation Best Practices — AWS Best Practices</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("aws-docs-theme-v2") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");</script>
+  <link rel="stylesheet" href="../assets/css/site.css">
+</head>
+<body>
+<div id="scroll-progress"></div>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><span class="brand-dot"></span>AWS Best Practices</a>
+    <nav class="header-actions" aria-label="Site actions">
+      <a class="gh-link" href="https://github.com/AlexanderBesss/AWS_best_praactices" target="_blank" rel="noopener">GitHub</a>
+      <button class="theme-btn" type="button" aria-label="Toggle color theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+  <article class="doc">
+
+    <section class="hero">
+      <h1>CloudFormation <span class="accent">Best Practices</span></h1>
+      <p class="lede">Infrastructure as Code brings repeatability, version control, and auditability to AWS provisioning. CloudFormation eliminates manual console clicks, reduces human error, and ensures every environment — development, staging, production — is built from the same verified blueprint.</p>
+      <div class="chips">
+        <a class="chip" href="#template-design">Template design</a>
+        <a class="chip" href="#modular-design">Modular design</a>
+        <a class="chip" href="#change-sets">Change sets</a>
+        <a class="chip" href="#drift-detection">Drift detection</a>
+      </div>
+    </section>
+
+    <nav class="toc">
+      <p class="toc-title">On this page</p>
+      <ul>
+        <li><a href="#template-design">Template Design</a></li>
+        <li><a href="#modular-design">Modular Design</a></li>
+        <li><a href="#parameters-conditions">Parameters &amp; Conditions</a></li>
+        <li><a href="#change-sets">Change Sets</a></li>
+        <li><a href="#drift-detection">Drift Detection</a></li>
+        <li><a href="#hooks">CloudFormation Hooks</a></li>
+        <li><a href="#protection">Resource &amp; Stack Protection</a></li>
+        <li><a href="#macros-transform">Macros &amp; Transform</a></li>
+        <li><a href="#monitoring">Monitoring</a></li>
+        <li><a href="#cost-optimization">Cost Optimization</a></li>
+      </ul>
+    </nav>
+
+    <section class="sec" id="template-design">
+      <h2>Template Design</h2>
+      <p>A well-structured template is easier to read, validate, and maintain. Consistent structure and naming make it possible to identify resources quickly, trace dependencies across stacks, and enforce organizational policies.</p>
+
+      <h3>Anatomy of a Template</h3>
+      <p>The following elements form the backbone of every CloudFormation template.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Element</th><th>Description</th><th>Best Practice</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>AWSTemplateFormatVersion</strong></td><td>Template format version</td><td>Optional; if present, use the only supported value, <code>2010-09-09</code></td></tr>
+            <tr><td><strong>Description</strong></td><td>Template description</td><td>Clear, concise</td></tr>
+            <tr><td><strong>Parameters</strong></td><td>User inputs</td><td>Validate with AllowedValues, Constraints</td></tr>
+            <tr><td><strong>Mappings</strong></td><td>Static lookups</td><td>Region-to-AMI mappings</td></tr>
+            <tr><td><strong>Conditions</strong></td><td>Conditional creation/configuration</td><td>Use a resource <code>Condition</code> attribute to include a resource; use <code>Fn::If</code> for conditional property values</td></tr>
+            <tr><td><strong>Resources</strong></td><td>AWS resources</td><td>Modular, logical IDs</td></tr>
+            <tr><td><strong>Outputs</strong></td><td>Return values</td><td>Export for cross-stack references</td></tr>
+            <tr><td><strong>Metadata</strong></td><td>Additional info</td><td>AWS::CloudFormation::Interface</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Naming Conventions</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Element</th><th>Convention</th><th>Example</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Logical ID</strong></td><td>PascalCase, descriptive</td><td>WebServerInstance</td></tr>
+            <tr><td><strong>Physical name</strong></td><td>Prefix-env-name</td><td>myapp-prod-web-server</td></tr>
+            <tr><td><strong>Parameters</strong></td><td>PascalCase</td><td>InstanceType</td></tr>
+            <tr><td><strong>Outputs</strong></td><td>PascalCase</td><td>WebsiteURL</td></tr>
+            <tr><td><strong>Stack name</strong></td><td>kebab-case, prefixed</td><td>myapp-prod-vpc</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="modular-design">
+      <h2>Modular Design</h2>
+      <p>Breaking infrastructure into focused, reusable pieces limits blast radius, enables independent updates, and clarifies ownership across teams.</p>
+
+      <h3>Stack Hierarchy</h3>
+      <p>Organizing stacks by responsibility keeps each stack small enough to review, update, and roll back on its own.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Level</th><th>Stack</th><th>Responsibility</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Foundation</strong></td><td>Network stack</td><td>VPC, subnets, routing</td></tr>
+            <tr><td><strong>Platform</strong></td><td>Compute stack</td><td>EC2, Auto Scaling groups, launch templates</td></tr>
+            <tr><td><strong>Data</strong></td><td>Database stack</td><td>RDS, parameter groups</td></tr>
+            <tr><td><strong>Workload</strong></td><td>Application stack</td><td>App-specific resources</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure class="diagram">
+        <span class="code-lang">diagram</span>
+        <div class="mermaid" data-mode="light"><svg id="r_default_18_0" width="100%" xmlns="http://www.w3.org/2000/svg" class="flowchart" style="max-width: 524.859375px;" viewBox="0 0 524.859375 422" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#r_default_18_0{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#333;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#r_default_18_0 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#r_default_18_0 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#r_default_18_0 .error-icon{fill:#552222;}#r_default_18_0 .error-text{fill:#552222;stroke:#552222;}#r_default_18_0 .edge-thickness-normal{stroke-width:1px;}#r_default_18_0 .edge-thickness-thick{stroke-width:3.5px;}#r_default_18_0 .edge-pattern-solid{stroke-dasharray:0;}#r_default_18_0 .edge-thickness-invisible{stroke-width:0;fill:none;}#r_default_18_0 .edge-pattern-dashed{stroke-dasharray:3;}#r_default_18_0 .edge-pattern-dotted{stroke-dasharray:2;}#r_default_18_0 .marker{fill:#333333;stroke:#333333;}#r_default_18_0 .marker.cross{stroke:#333333;}#r_default_18_0 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#r_default_18_0 p{margin:0;}#r_default_18_0 .label{font-family:"trebuchet ms",verdana,arial,sans-serif;color:#333;}#r_default_18_0 .cluster-label text{fill:#333;}#r_default_18_0 .cluster-label span{color:#333;}#r_default_18_0 .cluster-label span p{background-color:transparent;}#r_default_18_0 .label text,#r_default_18_0 span{fill:#333;color:#333;}#r_default_18_0 .node rect,#r_default_18_0 .node circle,#r_default_18_0 .node ellipse,#r_default_18_0 .node polygon,#r_default_18_0 .node path{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}#r_default_18_0 .rough-node .label text,#r_default_18_0 .node .label text,#r_default_18_0 .image-shape .label,#r_default_18_0 .icon-shape .label{text-anchor:middle;}#r_default_18_0 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#r_default_18_0 .rough-node .label,#r_default_18_0 .node .label,#r_default_18_0 .image-shape .label,#r_default_18_0 .icon-shape .label{text-align:center;}#r_default_18_0 .node.clickable{cursor:pointer;}#r_default_18_0 .root .anchor path{fill:#333333!important;stroke-width:0;stroke:#333333;}#r_default_18_0 .arrowheadPath{fill:#333333;}#r_default_18_0 .edgePaths .path{stroke:#333333;stroke-width:1px;}#r_default_18_0 .flowchart-link{stroke:#333333;fill:none;}#r_default_18_0 .edgeLabel{background-color:rgba(232,232,232, 0.8);text-align:center;}#r_default_18_0 .edgeLabel p{background-color:rgba(232,232,232, 0.8);}#r_default_18_0 .edgeLabel rect{opacity:0.5;background-color:rgba(232,232,232, 0.8);fill:rgba(232,232,232, 0.8);}#r_default_18_0 .labelBkg{background-color:rgba(232, 232, 232, 0.5);}#r_default_18_0 .cluster rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}#r_default_18_0 .cluster text{fill:#333;}#r_default_18_0 .cluster span{color:#333;}#r_default_18_0 .node .collapsed-indicator{fill:#aaaa33;stroke:none;opacity:0.6;}#r_default_18_0 .node .collapsed-separator{stroke:#aaaa33;stroke-width:0.75px;}#r_default_18_0 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:12px;background:hsl(80, 100%, 96.2745098039%);border:1px solid #aaaa33;border-radius:2px;pointer-events:none;z-index:100;}#r_default_18_0 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#333;}#r_default_18_0 rect.text{fill:none;stroke-width:0;}#r_default_18_0 .icon-shape,#r_default_18_0 .image-shape{background-color:rgba(232,232,232, 0.8);text-align:center;}#r_default_18_0 .icon-shape p,#r_default_18_0 .image-shape p{background-color:rgba(232,232,232, 0.8);padding:2px;}#r_default_18_0 .icon-shape .label rect,#r_default_18_0 .image-shape .label rect{opacity:0.5;background-color:rgba(232,232,232, 0.8);fill:rgba(232,232,232, 0.8);}#r_default_18_0 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#r_default_18_0 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#r_default_18_0 .node .neo-node{stroke:#9370DB;}#r_default_18_0 [data-look="neo"].node rect,#r_default_18_0 [data-look="neo"].cluster rect,#r_default_18_0 [data-look="neo"].node polygon{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_0 [data-look="neo"].swimlane.cluster rect{filter:none;}#r_default_18_0 [data-look="neo"].node path{stroke:#9370DB;stroke-width:1px;}#r_default_18_0 [data-look="neo"].node .outer-path{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_0 [data-look="neo"].node .neo-line path{stroke:#9370DB;filter:none;}#r_default_18_0 [data-look="neo"].node circle{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_0 [data-look="neo"].node circle .state-start{fill:#000000;}#r_default_18_0 [data-look="neo"].icon-shape .icon{fill:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_0 [data-look="neo"].icon-shape .icon-neo path{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_0 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="r_default_18_0_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_0_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_0_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_0_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></polygon></marker><marker id="r_default_18_0_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_18_0_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_18_0_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_18_0_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_18_0_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_0_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_0_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"></path></marker><marker id="r_default_18_0_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"></path></marker><g class="root"><g class="clusters"></g><g class="edgePaths"><path d="M214.28,86L201.314,94.167C188.348,102.333,162.416,118.667,149.45,134.333C136.484,150,136.484,165,136.484,172.5L136.484,180" id="r_default_18_0-L_N_P_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_N_P_0" data-points="W3sieCI6MjE0LjI4MDE0MDI2OTg4NjM3LCJ5Ijo4Nn0seyJ4IjoxMzYuNDg0Mzc1LCJ5IjoxMzV9LHsieCI6MTM2LjQ4NDM3NSwieSI6MTg0fV0=" data-look="classic" marker-end="url(#r_default_18_0_flowchart-v2-pointEnd)"></path><path d="M338.118,86L351.084,94.167C364.05,102.333,389.982,118.667,402.948,134.333C415.914,150,415.914,165,415.914,172.5L415.914,180" id="r_default_18_0-L_N_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_N_D_0" data-points="W3sieCI6MzM4LjExODI5NzIzMDExMzYsInkiOjg2fSx7IngiOjQxNS45MTQwNjI1LCJ5IjoxMzV9LHsieCI6NDE1LjkxNDA2MjUsInkiOjE4NH1d" data-look="classic" marker-end="url(#r_default_18_0_flowchart-v2-pointEnd)"></path><path d="M136.484,262L136.484,268.167C136.484,274.333,136.484,286.667,147.235,298.681C157.986,310.696,179.488,322.392,190.239,328.241L200.99,334.089" id="r_default_18_0-L_P_A_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_P_A_0" data-points="W3sieCI6MTM2LjQ4NDM3NSwieSI6MjYyfSx7IngiOjEzNi40ODQzNzUsInkiOjI5OX0seyJ4IjoyMDQuNTAzNDQzNjY3NzYzMTgsInkiOjMzNn1d" data-look="classic" marker-end="url(#r_default_18_0_flowchart-v2-pointEnd)"></path><path d="M415.914,262L415.914,268.167C415.914,274.333,415.914,286.667,405.163,298.681C394.412,310.696,372.911,322.392,362.16,328.241L351.409,334.089" id="r_default_18_0-L_D_A_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_D_A_0" data-points="W3sieCI6NDE1LjkxNDA2MjUsInkiOjI2Mn0seyJ4Ijo0MTUuOTE0MDYyNSwieSI6Mjk5fSx7IngiOjM0Ny44OTQ5OTM4MzIyMzY4LCJ5IjozMzZ9XQ==" data-look="classic" marker-end="url(#r_default_18_0_flowchart-v2-pointEnd)"></path></g><g class="edgeLabels"><g class="edgeLabel" transform="translate(136.484375, 135)"><g class="label" data-id="L_N_P_0" transform="translate(-100, -24)"><foreignObject width="200" height="48"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="edgeLabel"><p>outputs, parameters, or discovery</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(415.9140625, 135)"><g class="label" data-id="L_N_D_0" transform="translate(-69.6015625, -12)"><foreignObject width="139.203125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>network placement</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(136.484375, 299)"><g class="label" data-id="L_P_A_0" transform="translate(-68.609375, -12)"><foreignObject width="137.21875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>platform endpoints</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(415.9140625, 299)"><g class="label" data-id="L_D_A_0" transform="translate(-53.453125, -12)"><foreignObject width="106.90625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>data endpoints</p></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default" id="r_default_18_0-flowchart-N-0" data-look="classic" transform="translate(276.19921875, 47)"><rect class="basic label-container" style="" x="-114.8046875" y="-39" width="229.609375" height="78"></rect><g class="label" style="" transform="translate(-84.8046875, -24)"><rect></rect><foreignObject width="169.609375" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Foundation stack<br>VPC / subnets / routing</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_0-flowchart-P-1" data-look="classic" transform="translate(136.484375, 223)"><rect class="basic label-container" style="" x="-128.484375" y="-39" width="256.96875" height="78"></rect><g class="label" style="" transform="translate(-98.484375, -24)"><rect></rect><foreignObject width="196.96875" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Platform stack<br>compute / cluster / ingress</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_0-flowchart-D-2" data-look="classic" transform="translate(415.9140625, 223)"><rect class="basic label-container" style="" x="-100.9453125" y="-39" width="201.890625" height="78"></rect><g class="label" style="" transform="translate(-70.9453125, -24)"><rect></rect><foreignObject width="141.890625" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Data stack<br>databases / storage</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_0-flowchart-A-3" data-look="classic" transform="translate(276.19921875, 375)"><rect class="basic label-container" style="" x="-106.5" y="-39" width="213" height="78"></rect><g class="label" style="" transform="translate(-76.5, -24)"><rect></rect><foreignObject width="153" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Workload stack<br>application resources</p></span></div></foreignObject></g></g></g></g></g><defs><filter id="r_default_18_0-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs><defs><filter id="r_default_18_0-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs></svg></div>
+        <div class="mermaid" data-mode="dark"><svg id="r_dark_18_0" width="100%" xmlns="http://www.w3.org/2000/svg" class="flowchart" style="max-width: 524.859375px;" viewBox="0 0 524.859375 422" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#r_dark_18_0{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#ccc;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#r_dark_18_0 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#r_dark_18_0 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#r_dark_18_0 .error-icon{fill:#a44141;}#r_dark_18_0 .error-text{fill:#ddd;stroke:#ddd;}#r_dark_18_0 .edge-thickness-normal{stroke-width:1px;}#r_dark_18_0 .edge-thickness-thick{stroke-width:3.5px;}#r_dark_18_0 .edge-pattern-solid{stroke-dasharray:0;}#r_dark_18_0 .edge-thickness-invisible{stroke-width:0;fill:none;}#r_dark_18_0 .edge-pattern-dashed{stroke-dasharray:3;}#r_dark_18_0 .edge-pattern-dotted{stroke-dasharray:2;}#r_dark_18_0 .marker{fill:lightgrey;stroke:lightgrey;}#r_dark_18_0 .marker.cross{stroke:lightgrey;}#r_dark_18_0 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#r_dark_18_0 p{margin:0;}#r_dark_18_0 .label{font-family:"trebuchet ms",verdana,arial,sans-serif;color:#ccc;}#r_dark_18_0 .cluster-label text{fill:#F9FFFE;}#r_dark_18_0 .cluster-label span{color:#F9FFFE;}#r_dark_18_0 .cluster-label span p{background-color:transparent;}#r_dark_18_0 .label text,#r_dark_18_0 span{fill:#ccc;color:#ccc;}#r_dark_18_0 .node rect,#r_dark_18_0 .node circle,#r_dark_18_0 .node ellipse,#r_dark_18_0 .node polygon,#r_dark_18_0 .node path{fill:#1f2020;stroke:#ccc;stroke-width:1px;}#r_dark_18_0 .rough-node .label text,#r_dark_18_0 .node .label text,#r_dark_18_0 .image-shape .label,#r_dark_18_0 .icon-shape .label{text-anchor:middle;}#r_dark_18_0 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#r_dark_18_0 .rough-node .label,#r_dark_18_0 .node .label,#r_dark_18_0 .image-shape .label,#r_dark_18_0 .icon-shape .label{text-align:center;}#r_dark_18_0 .node.clickable{cursor:pointer;}#r_dark_18_0 .root .anchor path{fill:lightgrey!important;stroke-width:0;stroke:lightgrey;}#r_dark_18_0 .arrowheadPath{fill:lightgrey;}#r_dark_18_0 .edgePaths .path{stroke:lightgrey;stroke-width:1px;}#r_dark_18_0 .flowchart-link{stroke:lightgrey;fill:none;}#r_dark_18_0 .edgeLabel{background-color:hsl(0, 0%, 34.4117647059%);text-align:center;}#r_dark_18_0 .edgeLabel p{background-color:hsl(0, 0%, 34.4117647059%);}#r_dark_18_0 .edgeLabel rect{opacity:0.5;background-color:hsl(0, 0%, 34.4117647059%);fill:hsl(0, 0%, 34.4117647059%);}#r_dark_18_0 .labelBkg{background-color:rgba(87.75, 87.75, 87.75, 0.5);}#r_dark_18_0 .cluster rect{fill:hsl(180, 1.5873015873%, 28.3529411765%);stroke:rgba(255, 255, 255, 0.25);stroke-width:1px;}#r_dark_18_0 .cluster text{fill:#F9FFFE;}#r_dark_18_0 .cluster span{color:#F9FFFE;}#r_dark_18_0 .node .collapsed-indicator{fill:rgba(255, 255, 255, 0.25);stroke:none;opacity:0.6;}#r_dark_18_0 .node .collapsed-separator{stroke:rgba(255, 255, 255, 0.25);stroke-width:0.75px;}#r_dark_18_0 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:12px;background:hsl(20, 1.5873015873%, 12.3529411765%);border:1px solid rgba(255, 255, 255, 0.25);border-radius:2px;pointer-events:none;z-index:100;}#r_dark_18_0 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#ccc;}#r_dark_18_0 rect.text{fill:none;stroke-width:0;}#r_dark_18_0 .icon-shape,#r_dark_18_0 .image-shape{background-color:hsl(0, 0%, 34.4117647059%);text-align:center;}#r_dark_18_0 .icon-shape p,#r_dark_18_0 .image-shape p{background-color:hsl(0, 0%, 34.4117647059%);padding:2px;}#r_dark_18_0 .icon-shape .label rect,#r_dark_18_0 .image-shape .label rect{opacity:0.5;background-color:hsl(0, 0%, 34.4117647059%);fill:hsl(0, 0%, 34.4117647059%);}#r_dark_18_0 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#r_dark_18_0 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#r_dark_18_0 .node .neo-node{stroke:#ccc;}#r_dark_18_0 [data-look="neo"].node rect,#r_dark_18_0 [data-look="neo"].cluster rect,#r_dark_18_0 [data-look="neo"].node polygon{stroke:url(#r_dark_18_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_0 [data-look="neo"].swimlane.cluster rect{filter:none;}#r_dark_18_0 [data-look="neo"].node path{stroke:url(#r_dark_18_0-gradient);stroke-width:1px;}#r_dark_18_0 [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_0 [data-look="neo"].node .neo-line path{stroke:#ccc;filter:none;}#r_dark_18_0 [data-look="neo"].node circle{stroke:url(#r_dark_18_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_0 [data-look="neo"].node circle .state-start{fill:#000000;}#r_dark_18_0 [data-look="neo"].icon-shape .icon{fill:url(#r_dark_18_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_0 [data-look="neo"].icon-shape .icon-neo path{stroke:url(#r_dark_18_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_0 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="r_dark_18_0_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_0_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_0_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_0_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></polygon></marker><marker id="r_dark_18_0_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_18_0_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_18_0_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_18_0_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_18_0_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_0_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_0_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"></path></marker><marker id="r_dark_18_0_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"></path></marker><g class="root"><g class="clusters"></g><g class="edgePaths"><path d="M214.28,86L201.314,94.167C188.348,102.333,162.416,118.667,149.45,134.333C136.484,150,136.484,165,136.484,172.5L136.484,180" id="r_dark_18_0-L_N_P_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_N_P_0" data-points="W3sieCI6MjE0LjI4MDE0MDI2OTg4NjM3LCJ5Ijo4Nn0seyJ4IjoxMzYuNDg0Mzc1LCJ5IjoxMzV9LHsieCI6MTM2LjQ4NDM3NSwieSI6MTg0fV0=" data-look="classic" marker-end="url(#r_dark_18_0_flowchart-v2-pointEnd)"></path><path d="M338.118,86L351.084,94.167C364.05,102.333,389.982,118.667,402.948,134.333C415.914,150,415.914,165,415.914,172.5L415.914,180" id="r_dark_18_0-L_N_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_N_D_0" data-points="W3sieCI6MzM4LjExODI5NzIzMDExMzYsInkiOjg2fSx7IngiOjQxNS45MTQwNjI1LCJ5IjoxMzV9LHsieCI6NDE1LjkxNDA2MjUsInkiOjE4NH1d" data-look="classic" marker-end="url(#r_dark_18_0_flowchart-v2-pointEnd)"></path><path d="M136.484,262L136.484,268.167C136.484,274.333,136.484,286.667,147.235,298.681C157.986,310.696,179.488,322.392,190.239,328.241L200.99,334.089" id="r_dark_18_0-L_P_A_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_P_A_0" data-points="W3sieCI6MTM2LjQ4NDM3NSwieSI6MjYyfSx7IngiOjEzNi40ODQzNzUsInkiOjI5OX0seyJ4IjoyMDQuNTAzNDQzNjY3NzYzMTgsInkiOjMzNn1d" data-look="classic" marker-end="url(#r_dark_18_0_flowchart-v2-pointEnd)"></path><path d="M415.914,262L415.914,268.167C415.914,274.333,415.914,286.667,405.163,298.681C394.412,310.696,372.911,322.392,362.16,328.241L351.409,334.089" id="r_dark_18_0-L_D_A_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_D_A_0" data-points="W3sieCI6NDE1LjkxNDA2MjUsInkiOjI2Mn0seyJ4Ijo0MTUuOTE0MDYyNSwieSI6Mjk5fSx7IngiOjM0Ny44OTQ5OTM4MzIyMzY4LCJ5IjozMzZ9XQ==" data-look="classic" marker-end="url(#r_dark_18_0_flowchart-v2-pointEnd)"></path></g><g class="edgeLabels"><g class="edgeLabel" transform="translate(136.484375, 135)"><g class="label" data-id="L_N_P_0" transform="translate(-100, -24)"><foreignObject width="200" height="48"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="edgeLabel"><p>outputs, parameters, or discovery</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(415.9140625, 135)"><g class="label" data-id="L_N_D_0" transform="translate(-69.6015625, -12)"><foreignObject width="139.203125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>network placement</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(136.484375, 299)"><g class="label" data-id="L_P_A_0" transform="translate(-68.609375, -12)"><foreignObject width="137.21875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>platform endpoints</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(415.9140625, 299)"><g class="label" data-id="L_D_A_0" transform="translate(-53.453125, -12)"><foreignObject width="106.90625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>data endpoints</p></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default" id="r_dark_18_0-flowchart-N-0" data-look="classic" transform="translate(276.19921875, 47)"><rect class="basic label-container" style="" x="-114.8046875" y="-39" width="229.609375" height="78"></rect><g class="label" style="" transform="translate(-84.8046875, -24)"><rect></rect><foreignObject width="169.609375" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Foundation stack<br>VPC / subnets / routing</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_0-flowchart-P-1" data-look="classic" transform="translate(136.484375, 223)"><rect class="basic label-container" style="" x="-128.484375" y="-39" width="256.96875" height="78"></rect><g class="label" style="" transform="translate(-98.484375, -24)"><rect></rect><foreignObject width="196.96875" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Platform stack<br>compute / cluster / ingress</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_0-flowchart-D-2" data-look="classic" transform="translate(415.9140625, 223)"><rect class="basic label-container" style="" x="-100.9453125" y="-39" width="201.890625" height="78"></rect><g class="label" style="" transform="translate(-70.9453125, -24)"><rect></rect><foreignObject width="141.890625" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Data stack<br>databases / storage</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_0-flowchart-A-3" data-look="classic" transform="translate(276.19921875, 375)"><rect class="basic label-container" style="" x="-106.5" y="-39" width="213" height="78"></rect><g class="label" style="" transform="translate(-76.5, -24)"><rect></rect><foreignObject width="153" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Workload stack<br>application resources</p></span></div></foreignObject></g></g></g></g></g><defs><filter id="r_dark_18_0-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"></feDropShadow></filter></defs><defs><filter id="r_dark_18_0-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"></feDropShadow></filter></defs><linearGradient id="r_dark_18_0-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#cccccc" stop-opacity="1"></stop><stop offset="100%" stop-color="hsl(180, 0%, 18.3529411765%)" stop-opacity="1"></stop></linearGradient></svg></div>
+      </figure>
+
+      <h3>Nested Stacks</h3>
+      <p>Nested stacks break large templates into manageable pieces, reducing complexity and enabling reuse across projects.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Approach</th><th>Description</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>AWS::CloudFormation::Stack</strong></td><td>Nested stack resource</td><td>Reusable components</td></tr>
+            <tr><td><strong>Separate template files</strong></td><td>S3-hosted templates</td><td>Large templates</td></tr>
+            <tr><td><strong>Macro expansion</strong></td><td>Custom transformations</td><td>Code generation</td></tr>
+            <tr><td><strong>Custom Resources</strong></td><td>Lambda-backed extensions</td><td>Runtime config, complex logic</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Shared Modules</h3>
+      <p>Shared modules eliminate duplication and enforce consistent patterns for common infrastructure like networking, compute, and data stores.</p>
+      <div class="card-grid">
+        <div class="card">
+          <h3>VPC module</h3>
+          <p>VPC, subnets, IGW, NAT — cross-project reuse. See <a href="../Core-Services/VPC-Best-Practices.html">VPC Best Practices</a> for the underlying network design.</p>
+        </div>
+        <div class="card">
+          <h3>EKS module</h3>
+          <p>Cluster, node groups — cross-project reuse.</p>
+        </div>
+        <div class="card">
+          <h3>RDS module</h3>
+          <p>DB instance, subnet group — cross-project reuse.</p>
+        </div>
+        <div class="card">
+          <h3>IAM module</h3>
+          <p>Roles, policies — cross-project reuse.</p>
+        </div>
+        <div class="card">
+          <h3>ALB module</h3>
+          <p>Load balancer, listeners — cross-project reuse.</p>
+        </div>
+      </div>
+
+      <h3>CloudFormation Modules</h3>
+      <p>CloudFormation Modules package resources as reusable, versioned building blocks in the CloudFormation registry. A template references the registered module type name in its <code>Resources</code> section; <code>AWS::CloudFormation::ModuleVersion</code> is the resource used to register a module version, not the type consumers normally place in workload templates.</p>
+      <p>Choosing between modules and nested stacks depends on the granularity of reuse needed and whether you want registry-level versioning or template-level control.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Approach</th><th>Deployment Unit</th><th>Versioning</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Modules</strong></td><td>Inline resource type in same stack</td><td>Registry-versioned</td><td>Reusable resource patterns (e.g., standard S3 bucket + policy)</td></tr>
+            <tr><td><strong>Nested Stacks</strong></td><td>Separate child stack</td><td>Template-versioned</td><td>Larger, independently manageable components</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Multi-Account / Multi-Region Deployment</h3>
+      <p>StackSets eliminate the need to manage deployments individually across accounts and regions, enforcing consistent baselines at scale. For org-wide account structure, see <a href="../Design/09-multi-account-landing-zone-patterns.html">Multi-Account Landing Zone Patterns</a>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Approach</th><th>Description</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>StackSets</strong></td><td>Deploy stacks across accounts/regions from one operation</td><td>Centralized governance, org-wide baselines</td></tr>
+            <tr><td><strong>Service-managed permissions</strong></td><td>StackSets via AWS Organizations</td><td>Automatic deployment to new accounts/OUs</td></tr>
+            <tr><td><strong>Self-managed permissions</strong></td><td>IAM roles per account</td><td>Non-Organizations multi-account setups</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="parameters-conditions">
+      <h2>Parameters &amp; Conditions</h2>
+      <p>Typed, validated parameters and well-scoped conditions keep a single template correct across many environments.</p>
+
+      <h3>Parameter Types</h3>
+      <p>Using the correct parameter type gives CloudFormation built-in validation, narrowing the gap between what a consumer can pass and what the template actually accepts.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Type</th><th>Description</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>String</strong></td><td>Text values</td><td>Names, URLs</td></tr>
+            <tr><td><strong>Number</strong></td><td>Numeric values</td><td>Counts, sizes</td></tr>
+            <tr><td><strong>CommaDelimitedList</strong></td><td>Multiple values</td><td>Security group IDs</td></tr>
+            <tr><td><strong>AWS::EC2::Image::Id</strong></td><td>AMI IDs</td><td>Instance AMI</td></tr>
+            <tr><td><strong>AWS::EC2::Subnet::Id</strong></td><td>Subnet IDs</td><td>Subnet selection</td></tr>
+            <tr><td><strong>AWS::EC2::SecurityGroup::Id</strong></td><td>SG IDs</td><td>Security groups</td></tr>
+            <tr><td><strong>AWS::EC2::VPC::Id</strong></td><td>VPC IDs</td><td>VPC selection</td></tr>
+            <tr><td><strong>List&lt;Number&gt;</strong></td><td>Comma-separated numbers</td><td>Numeric lists</td></tr>
+            <tr><td><strong>List&lt;AWS-specific type&gt;</strong></td><td>Existing AWS resources</td><td>Multiple subnets, security groups, and similar resources</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Parameter Validation</h3>
+      <p>Validation constraints catch invalid inputs at deploy time, preventing misconfigured resources from being created in the first place.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Constraint</th><th>Description</th><th>Example</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>AllowedValues</strong></td><td>Specific values</td><td>t3.micro, t3.small</td></tr>
+            <tr><td><strong>AllowedPattern</strong></td><td>Regex pattern</td><td>^[a-zA-Z0-9-]+$</td></tr>
+            <tr><td><strong>MinValue / MaxValue</strong></td><td>Numeric range</td><td>1 to 10</td></tr>
+            <tr><td><strong>MinLength / MaxLength</strong></td><td>String length</td><td>1 to 64</td></tr>
+            <tr><td><strong>Default</strong></td><td>Default value</td><td>t3.micro</td></tr>
+            <tr><td><strong>Description</strong></td><td>Parameter description</td><td>Clear user guidance</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Conditions</h3>
+      <p>Conditions let a single template adapt to different environments without duplication, keeping infrastructure DRY and maintainable.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Function</th><th>Description</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Fn::If</strong></td><td>Conditional value</td><td>Create resource or not</td></tr>
+            <tr><td><strong>Fn::Equals</strong></td><td>Equality check</td><td>Condition evaluation</td></tr>
+            <tr><td><strong>Fn::And</strong></td><td>Logical AND</td><td>Multiple conditions</td></tr>
+            <tr><td><strong>Fn::Or</strong></td><td>Logical OR</td><td>Alternative conditions</td></tr>
+            <tr><td><strong>Fn::Not</strong></td><td>Logical NOT</td><td>Negation</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The separate <code>Rules</code> section supports rule functions such as <code>Fn::Contains</code> for validating parameter combinations before resource creation.</p>
+    </section>
+
+    <section class="sec" id="change-sets">
+      <h2>Change Sets</h2>
+      <p>Change sets let teams preview exactly what will change before committing, reducing the risk of unexpected disruptions.</p>
+
+      <h3>Change Set Workflow</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Step</th><th>Action</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td>Create change set</td><td>Define changes</td></tr>
+            <tr><td>2</td><td>Review changes</td><td>Evaluate impact</td></tr>
+            <tr><td>3</td><td>Approve changes</td><td>Manual or automated</td></tr>
+            <tr><td>4</td><td>Execute change set</td><td>Apply changes</td></tr>
+            <tr><td>5</td><td>Monitor execution</td><td>Track progress</td></tr>
+            <tr><td>6</td><td>Rollback on failure</td><td>Automatic or manual</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure class="diagram wide">
+        <span class="code-lang">diagram</span>
+        <div class="mermaid" data-mode="light"><svg id="r_default_18_1" width="1890.015625" height="232" xmlns="http://www.w3.org/2000/svg" class="flowchart" viewBox="0 0 1890.015625 232" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#r_default_18_1{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#333;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#r_default_18_1 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#r_default_18_1 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#r_default_18_1 .error-icon{fill:#552222;}#r_default_18_1 .error-text{fill:#552222;stroke:#552222;}#r_default_18_1 .edge-thickness-normal{stroke-width:1px;}#r_default_18_1 .edge-thickness-thick{stroke-width:3.5px;}#r_default_18_1 .edge-pattern-solid{stroke-dasharray:0;}#r_default_18_1 .edge-thickness-invisible{stroke-width:0;fill:none;}#r_default_18_1 .edge-pattern-dashed{stroke-dasharray:3;}#r_default_18_1 .edge-pattern-dotted{stroke-dasharray:2;}#r_default_18_1 .marker{fill:#333333;stroke:#333333;}#r_default_18_1 .marker.cross{stroke:#333333;}#r_default_18_1 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#r_default_18_1 p{margin:0;}#r_default_18_1 .label{font-family:"trebuchet ms",verdana,arial,sans-serif;color:#333;}#r_default_18_1 .cluster-label text{fill:#333;}#r_default_18_1 .cluster-label span{color:#333;}#r_default_18_1 .cluster-label span p{background-color:transparent;}#r_default_18_1 .label text,#r_default_18_1 span{fill:#333;color:#333;}#r_default_18_1 .node rect,#r_default_18_1 .node circle,#r_default_18_1 .node ellipse,#r_default_18_1 .node polygon,#r_default_18_1 .node path{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}#r_default_18_1 .rough-node .label text,#r_default_18_1 .node .label text,#r_default_18_1 .image-shape .label,#r_default_18_1 .icon-shape .label{text-anchor:middle;}#r_default_18_1 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#r_default_18_1 .rough-node .label,#r_default_18_1 .node .label,#r_default_18_1 .image-shape .label,#r_default_18_1 .icon-shape .label{text-align:center;}#r_default_18_1 .node.clickable{cursor:pointer;}#r_default_18_1 .root .anchor path{fill:#333333!important;stroke-width:0;stroke:#333333;}#r_default_18_1 .arrowheadPath{fill:#333333;}#r_default_18_1 .edgePaths .path{stroke:#333333;stroke-width:1px;}#r_default_18_1 .flowchart-link{stroke:#333333;fill:none;}#r_default_18_1 .edgeLabel{background-color:rgba(232,232,232, 0.8);text-align:center;}#r_default_18_1 .edgeLabel p{background-color:rgba(232,232,232, 0.8);}#r_default_18_1 .edgeLabel rect{opacity:0.5;background-color:rgba(232,232,232, 0.8);fill:rgba(232,232,232, 0.8);}#r_default_18_1 .labelBkg{background-color:rgba(232, 232, 232, 0.5);}#r_default_18_1 .cluster rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}#r_default_18_1 .cluster text{fill:#333;}#r_default_18_1 .cluster span{color:#333;}#r_default_18_1 .node .collapsed-indicator{fill:#aaaa33;stroke:none;opacity:0.6;}#r_default_18_1 .node .collapsed-separator{stroke:#aaaa33;stroke-width:0.75px;}#r_default_18_1 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:12px;background:hsl(80, 100%, 96.2745098039%);border:1px solid #aaaa33;border-radius:2px;pointer-events:none;z-index:100;}#r_default_18_1 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#333;}#r_default_18_1 rect.text{fill:none;stroke-width:0;}#r_default_18_1 .icon-shape,#r_default_18_1 .image-shape{background-color:rgba(232,232,232, 0.8);text-align:center;}#r_default_18_1 .icon-shape p,#r_default_18_1 .image-shape p{background-color:rgba(232,232,232, 0.8);padding:2px;}#r_default_18_1 .icon-shape .label rect,#r_default_18_1 .image-shape .label rect{opacity:0.5;background-color:rgba(232,232,232, 0.8);fill:rgba(232,232,232, 0.8);}#r_default_18_1 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#r_default_18_1 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#r_default_18_1 .node .neo-node{stroke:#9370DB;}#r_default_18_1 [data-look="neo"].node rect,#r_default_18_1 [data-look="neo"].cluster rect,#r_default_18_1 [data-look="neo"].node polygon{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_1 [data-look="neo"].swimlane.cluster rect{filter:none;}#r_default_18_1 [data-look="neo"].node path{stroke:#9370DB;stroke-width:1px;}#r_default_18_1 [data-look="neo"].node .outer-path{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_1 [data-look="neo"].node .neo-line path{stroke:#9370DB;filter:none;}#r_default_18_1 [data-look="neo"].node circle{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_1 [data-look="neo"].node circle .state-start{fill:#000000;}#r_default_18_1 [data-look="neo"].icon-shape .icon{fill:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_1 [data-look="neo"].icon-shape .icon-neo path{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_18_1 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="r_default_18_1_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_1_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_1_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_1_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></polygon></marker><marker id="r_default_18_1_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_18_1_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_18_1_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_18_1_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_18_1_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_1_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_18_1_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"></path></marker><marker id="r_default_18_1_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"></path></marker><g class="root"><g class="clusters"></g><g class="edgePaths"><path d="M190.625,145L194.792,145C198.958,145,207.292,145,214.958,145C222.625,145,229.625,145,233.125,145L236.625,145" id="r_default_18_1-L_A_B_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_A_B_0" data-points="W3sieCI6MTkwLjYyNSwieSI6MTQ1fSx7IngiOjIxNS42MjUsInkiOjE0NX0seyJ4IjoyNDAuNjI1LCJ5IjoxNDV9XQ==" data-look="classic" marker-end="url(#r_default_18_1_flowchart-v2-pointEnd)"></path><path d="M433.25,145L437.417,145C441.583,145,449.917,145,457.583,145C465.25,145,472.25,145,475.75,145L479.25,145" id="r_default_18_1-L_B_C_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_B_C_0" data-points="W3sieCI6NDMzLjI1LCJ5IjoxNDV9LHsieCI6NDU4LjI1LCJ5IjoxNDV9LHsieCI6NDgzLjI1LCJ5IjoxNDV9XQ==" data-look="classic" marker-end="url(#r_default_18_1_flowchart-v2-pointEnd)"></path><path d="M754.813,145L758.979,145C763.146,145,771.479,145,779.146,145C786.813,145,793.813,145,797.313,145L800.813,145" id="r_default_18_1-L_C_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_D_0" data-points="W3sieCI6NzU0LjgxMjUsInkiOjE0NX0seyJ4Ijo3NzkuODEyNSwieSI6MTQ1fSx7IngiOjgwNC44MTI1LCJ5IjoxNDV9XQ==" data-look="classic" marker-end="url(#r_default_18_1_flowchart-v2-pointEnd)"></path><path d="M902.449,124.121L911.984,118.934C921.518,113.748,940.587,103.374,955.51,98.187C970.432,93,981.208,93,986.596,93L991.984,93" id="r_default_18_1-L_D_E_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_D_E_0" data-points="W3sieCI6OTAyLjQ0OTM5OTY4MTA2NTEsInkiOjEyNC4xMjEyNzQ2ODEwNjUwNn0seyJ4Ijo5NTkuNjU2MjUsInkiOjkzfSx7IngiOjk5NS45ODQzNzUsInkiOjkzfV0=" data-look="classic" marker-end="url(#r_default_18_1_flowchart-v2-pointEnd)"></path><path d="M902.449,165.879L911.984,171.066C921.518,176.252,940.587,186.626,955.904,191.813C971.221,197,982.786,197,988.569,197L994.352,197" id="r_default_18_1-L_D_F_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_D_F_0" data-points="W3sieCI6OTAyLjQ0OTM5OTY4MTA2NTEsInkiOjE2NS44Nzg3MjUzMTg5MzQ5NX0seyJ4Ijo5NTkuNjU2MjUsInkiOjE5N30seyJ4Ijo5OTguMzUxNTYyNSwieSI6MTk3fV0=" data-look="classic" marker-end="url(#r_default_18_1_flowchart-v2-pointEnd)"></path><path d="M1197.656,93L1201.823,93C1205.99,93,1214.323,93,1221.99,93C1229.656,93,1236.656,93,1240.156,93L1243.656,93" id="r_default_18_1-L_E_G_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_E_G_0" data-points="W3sieCI6MTE5Ny42NTYyNSwieSI6OTN9LHsieCI6MTIyMi42NTYyNSwieSI6OTN9LHsieCI6MTI0Ny42NTYyNSwieSI6OTN9XQ==" data-look="classic" marker-end="url(#r_default_18_1_flowchart-v2-pointEnd)"></path><path d="M1437.078,93L1441.245,93C1445.411,93,1453.745,93,1461.411,93C1469.078,93,1476.078,93,1479.578,93L1483.078,93" id="r_default_18_1-L_G_H_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_G_H_0" data-points="W3sieCI6MTQzNy4wNzgxMjUsInkiOjkzfSx7IngiOjE0NjIuMDc4MTI1LCJ5Ijo5M30seyJ4IjoxNDg3LjA3ODEyNSwieSI6OTN9XQ==" data-look="classic" marker-end="url(#r_default_18_1_flowchart-v2-pointEnd)"></path><path d="M1579.094,71.172L1588.787,65.143C1598.479,59.115,1617.865,47.057,1636.66,41.029C1655.456,35,1673.661,35,1682.764,35L1691.867,35" id="r_default_18_1-L_H_I_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_H_I_0" data-points="W3sieCI6MTU3OS4wOTM5ODI0MzgwMTY2LCJ5Ijo3MS4xNzIxMDc0MzgwMTY1Mn0seyJ4IjoxNjM3LjI1LCJ5IjozNX0seyJ4IjoxNjk1Ljg2NzE4NzUsInkiOjM1fV0=" data-look="classic" marker-end="url(#r_default_18_1_flowchart-v2-pointEnd)"></path><path d="M1579.094,114.828L1588.787,120.857C1598.479,126.885,1617.865,138.943,1632.945,144.971C1648.026,151,1658.802,151,1664.19,151L1669.578,151" id="r_default_18_1-L_H_J_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_H_J_0" data-points="W3sieCI6MTU3OS4wOTM5ODI0MzgwMTY2LCJ5IjoxMTQuODI3ODkyNTYxOTgzNDh9LHsieCI6MTYzNy4yNSwieSI6MTUxfSx7IngiOjE2NzMuNTc4MTI1LCJ5IjoxNTF9XQ==" data-look="classic" marker-end="url(#r_default_18_1_flowchart-v2-pointEnd)"></path></g><g class="edgeLabels"><g class="edgeLabel"><g class="label" data-id="L_A_B_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_B_C_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_D_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(959.65625, 93)"><g class="label" data-id="L_D_E_0" transform="translate(-11.328125, -12)"><foreignObject width="22.65625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>Yes</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(959.65625, 197)"><g class="label" data-id="L_D_F_0" transform="translate(-9.3984375, -12)"><foreignObject width="18.796875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>No</p></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_E_G_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_G_H_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(1637.25, 35)"><g class="label" data-id="L_H_I_0" transform="translate(-11.328125, -12)"><foreignObject width="22.65625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>Yes</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(1637.25, 151)"><g class="label" data-id="L_H_J_0" transform="translate(-9.3984375, -12)"><foreignObject width="18.796875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>No</p></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default" id="r_default_18_1-flowchart-A-0" data-look="classic" transform="translate(99.3125, 145)"><rect class="basic label-container" style="" x="-91.3125" y="-39" width="182.625" height="78"></rect><g class="label" style="" transform="translate(-61.3125, -24)"><rect></rect><foreignObject width="122.625" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Update Template<br>or Parameters</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_1-flowchart-B-1" data-look="classic" transform="translate(336.9375, 145)"><rect class="basic label-container" style="" x="-96.3125" y="-27" width="192.625" height="54"></rect><g class="label" style="" transform="translate(-66.3125, -12)"><rect></rect><foreignObject width="132.625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Create Change Set</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_1-flowchart-C-3" data-look="classic" transform="translate(619.03125, 145)"><rect class="basic label-container" style="" x="-135.78125" y="-39" width="271.5625" height="78"></rect><g class="label" style="" transform="translate(-105.78125, -24)"><rect></rect><foreignObject width="211.5625" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="nodeLabel"><p>Review Changes<br>Add/Modify/Remove/Replace</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_1-flowchart-D-5" data-look="classic" transform="translate(864.0703125, 145)"><polygon points="59.2578125,0 118.515625,-59.2578125 59.2578125,-118.515625 0,-59.2578125" class="label-container" transform="translate(-58.7578125, 59.2578125)"></polygon><g class="label" style="" transform="translate(-32.2578125, -12)"><rect></rect><foreignObject width="64.515625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Approve?</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_1-flowchart-E-7" data-look="classic" transform="translate(1096.8203125, 93)"><rect class="basic label-container" style="" x="-100.8359375" y="-27" width="201.671875" height="54"></rect><g class="label" style="" transform="translate(-70.8359375, -12)"><rect></rect><foreignObject width="141.671875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Execute Change Set</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_1-flowchart-F-9" data-look="classic" transform="translate(1096.8203125, 197)"><rect class="basic label-container" style="" x="-98.46875" y="-27" width="196.9375" height="54"></rect><g class="label" style="" transform="translate(-68.46875, -12)"><rect></rect><foreignObject width="136.9375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Discard Change Set</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_1-flowchart-G-11" data-look="classic" transform="translate(1342.3671875, 93)"><rect class="basic label-container" style="" x="-94.7109375" y="-27" width="189.421875" height="54"></rect><g class="label" style="" transform="translate(-64.7109375, -12)"><rect></rect><foreignObject width="129.421875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Monitor Execution</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_1-flowchart-H-13" data-look="classic" transform="translate(1544, 93)"><polygon points="56.921875,0 113.84375,-56.921875 56.921875,-113.84375 0,-56.921875" class="label-container" transform="translate(-56.421875, 56.921875)"></polygon><g class="label" style="" transform="translate(-29.921875, -12)"><rect></rect><foreignObject width="59.84375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Success?</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_1-flowchart-I-15" data-look="classic" transform="translate(1777.796875, 35)"><rect class="basic label-container" style="" x="-81.9296875" y="-27" width="163.859375" height="54"></rect><g class="label" style="" transform="translate(-51.9296875, -12)"><rect></rect><foreignObject width="103.859375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Stack Updated</p></span></div></foreignObject></g></g><g class="node default" id="r_default_18_1-flowchart-J-17" data-look="classic" transform="translate(1777.796875, 151)"><rect class="basic label-container" style="" x="-104.21875" y="-39" width="208.4375" height="78"></rect><g class="label" style="" transform="translate(-74.21875, -24)"><rect></rect><foreignObject width="148.4375" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Rollback<br>Automatic or Manual</p></span></div></foreignObject></g></g></g></g></g><defs><filter id="r_default_18_1-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs><defs><filter id="r_default_18_1-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs></svg></div>
+        <div class="mermaid" data-mode="dark"><svg id="r_dark_18_1" width="1890.015625" height="232" xmlns="http://www.w3.org/2000/svg" class="flowchart" viewBox="0 0 1890.015625 232" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#r_dark_18_1{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#ccc;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#r_dark_18_1 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#r_dark_18_1 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#r_dark_18_1 .error-icon{fill:#a44141;}#r_dark_18_1 .error-text{fill:#ddd;stroke:#ddd;}#r_dark_18_1 .edge-thickness-normal{stroke-width:1px;}#r_dark_18_1 .edge-thickness-thick{stroke-width:3.5px;}#r_dark_18_1 .edge-pattern-solid{stroke-dasharray:0;}#r_dark_18_1 .edge-thickness-invisible{stroke-width:0;fill:none;}#r_dark_18_1 .edge-pattern-dashed{stroke-dasharray:3;}#r_dark_18_1 .edge-pattern-dotted{stroke-dasharray:2;}#r_dark_18_1 .marker{fill:lightgrey;stroke:lightgrey;}#r_dark_18_1 .marker.cross{stroke:lightgrey;}#r_dark_18_1 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#r_dark_18_1 p{margin:0;}#r_dark_18_1 .label{font-family:"trebuchet ms",verdana,arial,sans-serif;color:#ccc;}#r_dark_18_1 .cluster-label text{fill:#F9FFFE;}#r_dark_18_1 .cluster-label span{color:#F9FFFE;}#r_dark_18_1 .cluster-label span p{background-color:transparent;}#r_dark_18_1 .label text,#r_dark_18_1 span{fill:#ccc;color:#ccc;}#r_dark_18_1 .node rect,#r_dark_18_1 .node circle,#r_dark_18_1 .node ellipse,#r_dark_18_1 .node polygon,#r_dark_18_1 .node path{fill:#1f2020;stroke:#ccc;stroke-width:1px;}#r_dark_18_1 .rough-node .label text,#r_dark_18_1 .node .label text,#r_dark_18_1 .image-shape .label,#r_dark_18_1 .icon-shape .label{text-anchor:middle;}#r_dark_18_1 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#r_dark_18_1 .rough-node .label,#r_dark_18_1 .node .label,#r_dark_18_1 .image-shape .label,#r_dark_18_1 .icon-shape .label{text-align:center;}#r_dark_18_1 .node.clickable{cursor:pointer;}#r_dark_18_1 .root .anchor path{fill:lightgrey!important;stroke-width:0;stroke:lightgrey;}#r_dark_18_1 .arrowheadPath{fill:lightgrey;}#r_dark_18_1 .edgePaths .path{stroke:lightgrey;stroke-width:1px;}#r_dark_18_1 .flowchart-link{stroke:lightgrey;fill:none;}#r_dark_18_1 .edgeLabel{background-color:hsl(0, 0%, 34.4117647059%);text-align:center;}#r_dark_18_1 .edgeLabel p{background-color:hsl(0, 0%, 34.4117647059%);}#r_dark_18_1 .edgeLabel rect{opacity:0.5;background-color:hsl(0, 0%, 34.4117647059%);fill:hsl(0, 0%, 34.4117647059%);}#r_dark_18_1 .labelBkg{background-color:rgba(87.75, 87.75, 87.75, 0.5);}#r_dark_18_1 .cluster rect{fill:hsl(180, 1.5873015873%, 28.3529411765%);stroke:rgba(255, 255, 255, 0.25);stroke-width:1px;}#r_dark_18_1 .cluster text{fill:#F9FFFE;}#r_dark_18_1 .cluster span{color:#F9FFFE;}#r_dark_18_1 .node .collapsed-indicator{fill:rgba(255, 255, 255, 0.25);stroke:none;opacity:0.6;}#r_dark_18_1 .node .collapsed-separator{stroke:rgba(255, 255, 255, 0.25);stroke-width:0.75px;}#r_dark_18_1 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:12px;background:hsl(20, 1.5873015873%, 12.3529411765%);border:1px solid rgba(255, 255, 255, 0.25);border-radius:2px;pointer-events:none;z-index:100;}#r_dark_18_1 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#ccc;}#r_dark_18_1 rect.text{fill:none;stroke-width:0;}#r_dark_18_1 .icon-shape,#r_dark_18_1 .image-shape{background-color:hsl(0, 0%, 34.4117647059%);text-align:center;}#r_dark_18_1 .icon-shape p,#r_dark_18_1 .image-shape p{background-color:hsl(0, 0%, 34.4117647059%);padding:2px;}#r_dark_18_1 .icon-shape .label rect,#r_dark_18_1 .image-shape .label rect{opacity:0.5;background-color:hsl(0, 0%, 34.4117647059%);fill:hsl(0, 0%, 34.4117647059%);}#r_dark_18_1 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#r_dark_18_1 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#r_dark_18_1 .node .neo-node{stroke:#ccc;}#r_dark_18_1 [data-look="neo"].node rect,#r_dark_18_1 [data-look="neo"].cluster rect,#r_dark_18_1 [data-look="neo"].node polygon{stroke:url(#r_dark_18_1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_1 [data-look="neo"].swimlane.cluster rect{filter:none;}#r_dark_18_1 [data-look="neo"].node path{stroke:url(#r_dark_18_1-gradient);stroke-width:1px;}#r_dark_18_1 [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_1 [data-look="neo"].node .neo-line path{stroke:#ccc;filter:none;}#r_dark_18_1 [data-look="neo"].node circle{stroke:url(#r_dark_18_1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_1 [data-look="neo"].node circle .state-start{fill:#000000;}#r_dark_18_1 [data-look="neo"].icon-shape .icon{fill:url(#r_dark_18_1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_1 [data-look="neo"].icon-shape .icon-neo path{stroke:url(#r_dark_18_1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_18_1 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="r_dark_18_1_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_1_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_1_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_1_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></polygon></marker><marker id="r_dark_18_1_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_18_1_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_18_1_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_18_1_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_18_1_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_1_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_18_1_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"></path></marker><marker id="r_dark_18_1_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"></path></marker><g class="root"><g class="clusters"></g><g class="edgePaths"><path d="M190.625,145L194.792,145C198.958,145,207.292,145,214.958,145C222.625,145,229.625,145,233.125,145L236.625,145" id="r_dark_18_1-L_A_B_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_A_B_0" data-points="W3sieCI6MTkwLjYyNSwieSI6MTQ1fSx7IngiOjIxNS42MjUsInkiOjE0NX0seyJ4IjoyNDAuNjI1LCJ5IjoxNDV9XQ==" data-look="classic" marker-end="url(#r_dark_18_1_flowchart-v2-pointEnd)"></path><path d="M433.25,145L437.417,145C441.583,145,449.917,145,457.583,145C465.25,145,472.25,145,475.75,145L479.25,145" id="r_dark_18_1-L_B_C_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_B_C_0" data-points="W3sieCI6NDMzLjI1LCJ5IjoxNDV9LHsieCI6NDU4LjI1LCJ5IjoxNDV9LHsieCI6NDgzLjI1LCJ5IjoxNDV9XQ==" data-look="classic" marker-end="url(#r_dark_18_1_flowchart-v2-pointEnd)"></path><path d="M754.813,145L758.979,145C763.146,145,771.479,145,779.146,145C786.813,145,793.813,145,797.313,145L800.813,145" id="r_dark_18_1-L_C_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_D_0" data-points="W3sieCI6NzU0LjgxMjUsInkiOjE0NX0seyJ4Ijo3NzkuODEyNSwieSI6MTQ1fSx7IngiOjgwNC44MTI1LCJ5IjoxNDV9XQ==" data-look="classic" marker-end="url(#r_dark_18_1_flowchart-v2-pointEnd)"></path><path d="M902.449,124.121L911.984,118.934C921.518,113.748,940.587,103.374,955.51,98.187C970.432,93,981.208,93,986.596,93L991.984,93" id="r_dark_18_1-L_D_E_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_D_E_0" data-points="W3sieCI6OTAyLjQ0OTM5OTY4MTA2NTEsInkiOjEyNC4xMjEyNzQ2ODEwNjUwNn0seyJ4Ijo5NTkuNjU2MjUsInkiOjkzfSx7IngiOjk5NS45ODQzNzUsInkiOjkzfV0=" data-look="classic" marker-end="url(#r_dark_18_1_flowchart-v2-pointEnd)"></path><path d="M902.449,165.879L911.984,171.066C921.518,176.252,940.587,186.626,955.904,191.813C971.221,197,982.786,197,988.569,197L994.352,197" id="r_dark_18_1-L_D_F_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_D_F_0" data-points="W3sieCI6OTAyLjQ0OTM5OTY4MTA2NTEsInkiOjE2NS44Nzg3MjUzMTg5MzQ5NX0seyJ4Ijo5NTkuNjU2MjUsInkiOjE5N30seyJ4Ijo5OTguMzUxNTYyNSwieSI6MTk3fV0=" data-look="classic" marker-end="url(#r_dark_18_1_flowchart-v2-pointEnd)"></path><path d="M1197.656,93L1201.823,93C1205.99,93,1214.323,93,1221.99,93C1229.656,93,1236.656,93,1240.156,93L1243.656,93" id="r_dark_18_1-L_E_G_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_E_G_0" data-points="W3sieCI6MTE5Ny42NTYyNSwieSI6OTN9LHsieCI6MTIyMi42NTYyNSwieSI6OTN9LHsieCI6MTI0Ny42NTYyNSwieSI6OTN9XQ==" data-look="classic" marker-end="url(#r_dark_18_1_flowchart-v2-pointEnd)"></path><path d="M1437.078,93L1441.245,93C1445.411,93,1453.745,93,1461.411,93C1469.078,93,1476.078,93,1479.578,93L1483.078,93" id="r_dark_18_1-L_G_H_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_G_H_0" data-points="W3sieCI6MTQzNy4wNzgxMjUsInkiOjkzfSx7IngiOjE0NjIuMDc4MTI1LCJ5Ijo5M30seyJ4IjoxNDg3LjA3ODEyNSwieSI6OTN9XQ==" data-look="classic" marker-end="url(#r_dark_18_1_flowchart-v2-pointEnd)"></path><path d="M1579.094,71.172L1588.787,65.143C1598.479,59.115,1617.865,47.057,1636.66,41.029C1655.456,35,1673.661,35,1682.764,35L1691.867,35" id="r_dark_18_1-L_H_I_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_H_I_0" data-points="W3sieCI6MTU3OS4wOTM5ODI0MzgwMTY2LCJ5Ijo3MS4xNzIxMDc0MzgwMTY1Mn0seyJ4IjoxNjM3LjI1LCJ5IjozNX0seyJ4IjoxNjk1Ljg2NzE4NzUsInkiOjM1fV0=" data-look="classic" marker-end="url(#r_dark_18_1_flowchart-v2-pointEnd)"></path><path d="M1579.094,114.828L1588.787,120.857C1598.479,126.885,1617.865,138.943,1632.945,144.971C1648.026,151,1658.802,151,1664.19,151L1669.578,151" id="r_dark_18_1-L_H_J_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_H_J_0" data-points="W3sieCI6MTU3OS4wOTM5ODI0MzgwMTY2LCJ5IjoxMTQuODI3ODkyNTYxOTgzNDh9LHsieCI6MTYzNy4yNSwieSI6MTUxfSx7IngiOjE2NzMuNTc4MTI1LCJ5IjoxNTF9XQ==" data-look="classic" marker-end="url(#r_dark_18_1_flowchart-v2-pointEnd)"></path></g><g class="edgeLabels"><g class="edgeLabel"><g class="label" data-id="L_A_B_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_B_C_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_D_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(959.65625, 93)"><g class="label" data-id="L_D_E_0" transform="translate(-11.328125, -12)"><foreignObject width="22.65625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>Yes</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(959.65625, 197)"><g class="label" data-id="L_D_F_0" transform="translate(-9.3984375, -12)"><foreignObject width="18.796875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>No</p></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_E_G_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_G_H_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(1637.25, 35)"><g class="label" data-id="L_H_I_0" transform="translate(-11.328125, -12)"><foreignObject width="22.65625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>Yes</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(1637.25, 151)"><g class="label" data-id="L_H_J_0" transform="translate(-9.3984375, -12)"><foreignObject width="18.796875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>No</p></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default" id="r_dark_18_1-flowchart-A-0" data-look="classic" transform="translate(99.3125, 145)"><rect class="basic label-container" style="" x="-91.3125" y="-39" width="182.625" height="78"></rect><g class="label" style="" transform="translate(-61.3125, -24)"><rect></rect><foreignObject width="122.625" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Update Template<br>or Parameters</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_1-flowchart-B-1" data-look="classic" transform="translate(336.9375, 145)"><rect class="basic label-container" style="" x="-96.3125" y="-27" width="192.625" height="54"></rect><g class="label" style="" transform="translate(-66.3125, -12)"><rect></rect><foreignObject width="132.625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Create Change Set</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_1-flowchart-C-3" data-look="classic" transform="translate(619.03125, 145)"><rect class="basic label-container" style="" x="-135.78125" y="-39" width="271.5625" height="78"></rect><g class="label" style="" transform="translate(-105.78125, -24)"><rect></rect><foreignObject width="211.5625" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="nodeLabel"><p>Review Changes<br>Add/Modify/Remove/Replace</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_1-flowchart-D-5" data-look="classic" transform="translate(864.0703125, 145)"><polygon points="59.2578125,0 118.515625,-59.2578125 59.2578125,-118.515625 0,-59.2578125" class="label-container" transform="translate(-58.7578125, 59.2578125)"></polygon><g class="label" style="" transform="translate(-32.2578125, -12)"><rect></rect><foreignObject width="64.515625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Approve?</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_1-flowchart-E-7" data-look="classic" transform="translate(1096.8203125, 93)"><rect class="basic label-container" style="" x="-100.8359375" y="-27" width="201.671875" height="54"></rect><g class="label" style="" transform="translate(-70.8359375, -12)"><rect></rect><foreignObject width="141.671875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Execute Change Set</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_1-flowchart-F-9" data-look="classic" transform="translate(1096.8203125, 197)"><rect class="basic label-container" style="" x="-98.46875" y="-27" width="196.9375" height="54"></rect><g class="label" style="" transform="translate(-68.46875, -12)"><rect></rect><foreignObject width="136.9375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Discard Change Set</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_1-flowchart-G-11" data-look="classic" transform="translate(1342.3671875, 93)"><rect class="basic label-container" style="" x="-94.7109375" y="-27" width="189.421875" height="54"></rect><g class="label" style="" transform="translate(-64.7109375, -12)"><rect></rect><foreignObject width="129.421875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Monitor Execution</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_1-flowchart-H-13" data-look="classic" transform="translate(1544, 93)"><polygon points="56.921875,0 113.84375,-56.921875 56.921875,-113.84375 0,-56.921875" class="label-container" transform="translate(-56.421875, 56.921875)"></polygon><g class="label" style="" transform="translate(-29.921875, -12)"><rect></rect><foreignObject width="59.84375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Success?</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_1-flowchart-I-15" data-look="classic" transform="translate(1777.796875, 35)"><rect class="basic label-container" style="" x="-81.9296875" y="-27" width="163.859375" height="54"></rect><g class="label" style="" transform="translate(-51.9296875, -12)"><rect></rect><foreignObject width="103.859375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Stack Updated</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_18_1-flowchart-J-17" data-look="classic" transform="translate(1777.796875, 151)"><rect class="basic label-container" style="" x="-104.21875" y="-39" width="208.4375" height="78"></rect><g class="label" style="" transform="translate(-74.21875, -24)"><rect></rect><foreignObject width="148.4375" height="48"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Rollback<br>Automatic or Manual</p></span></div></foreignObject></g></g></g></g></g><defs><filter id="r_dark_18_1-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"></feDropShadow></filter></defs><defs><filter id="r_dark_18_1-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"></feDropShadow></filter></defs><linearGradient id="r_dark_18_1-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#cccccc" stop-opacity="1"></stop><stop offset="100%" stop-color="hsl(180, 0%, 18.3529411765%)" stop-opacity="1"></stop></linearGradient></svg></div>
+      </figure>
+
+      <h3>Change Types</h3>
+      <p>Understanding change categories helps reviewers assess risk and decide whether a change set needs additional scrutiny or rollback triggers.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Type</th><th>Description</th><th>Risk</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Add</strong></td><td>New resources</td><td>Low</td></tr>
+            <tr><td><strong>Modify</strong></td><td>Changed properties</td><td>Medium</td></tr>
+            <tr><td><strong>Remove</strong></td><td>Deleted resources</td><td>High</td></tr>
+            <tr><td><strong>Replace</strong></td><td>New resource, same logical ID</td><td>High</td></tr>
+            <tr><td><strong>Import</strong></td><td>Existing resource into stack</td><td>Medium</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout warning"><div><span class="callout-title">Warning</span><p>Change sets improve review but do not guarantee that an update will succeed. They can also omit the resolved values of dynamic references. Review replacements, IAM changes, macros, and downstream service effects before execution.</p></div></div>
+    </section>
+
+    <section class="sec" id="drift-detection">
+      <h2>Drift Detection</h2>
+      <p>Drift — the divergence between what the template declares and what actually exists — is inevitable in a live environment. The goal is to detect it early, understand why it happened, and reconcile it deliberately.</p>
+
+      <h3>Drift Management</h3>
+      <p>Detecting drift early prevents configuration divergence from becoming a production incident or a compliance violation.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Action</th><th>Description</th><th>Frequency</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Detect drift</strong></td><td>Compare supported resources with expected configuration</td><td>Based on change risk</td></tr>
+            <tr><td><strong>Schedule drift detection</strong></td><td>Use EventBridge Scheduler with Lambda/Step Functions or another automation; CloudFormation does not schedule it itself</td><td>Periodic governance</td></tr>
+            <tr><td><strong>Update stack</strong></td><td>Fix drifted resources</td><td>As needed</td></tr>
+            <tr><td><strong>Import resources</strong></td><td>Add existing resources</td><td>Migration</td></tr>
+            <tr><td><strong>IaC generator</strong></td><td>Scan supported existing resources and generate/import a template</td><td>Migration starting point; review before deployment</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Drift Causes</h3>
+      <p>Understanding what causes drift helps teams put the right guardrails in place and respond when changes slip through.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Cause</th><th>Prevention</th><th>Resolution</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Manual console changes</td><td>SCPs to deny changes</td><td>Update template</td></tr>
+            <tr><td>Expected service-managed changes</td><td>Avoid treating runtime state such as Auto Scaling membership as template-owned configuration</td><td>Review resource-specific drift semantics</td></tr>
+            <tr><td>Cross-stack changes</td><td>Update all stacks</td><td>Coordinated update</td></tr>
+            <tr><td>AWS service updates</td><td>Monitor for changes</td><td>Update template</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="hooks">
+      <h2>CloudFormation Hooks</h2>
+      <p>Hooks enforce policy before resources are created or modified, closing the gap between what the template declares and what the organization allows.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Component</th><th>Description</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Hook</strong></td><td>Evaluates resource, stack, change-set, or Cloud Control operations at supported invocation points</td><td>Block or warn on non-compliant changes</td></tr>
+            <tr><td><strong>Guard-based Hook</strong></td><td>Hook logic authored in CloudFormation Guard DSL, no Lambda needed</td><td>Policy-as-code checks (tagging, encryption, sizing)</td></tr>
+            <tr><td><strong>Lambda-based Hook</strong></td><td>Custom logic via the CloudFormation Hooks CLI/SDK</td><td>Complex or external validation</td></tr>
+            <tr><td><strong>Target actions</strong></td><td>CREATE, UPDATE, DELETE</td><td>Scope enforcement to specific operations</td></tr>
+            <tr><td><strong>Failure mode</strong></td><td>FAIL (block) or WARN (allow with notice)</td><td>Rollout without breaking existing pipelines</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Hooks run before drift can occur, complementing drift detection (which is reactive) with proactive, pre-provisioning compliance checks.</p>
+    </section>
+
+    <section class="sec" id="protection">
+      <h2>Resource &amp; Stack Protection</h2>
+      <p>The right protection policies prevent accidental data loss when stacks are updated or deleted.</p>
+
+      <h3>Resource Policies</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Resource</th><th>UpdateReplacePolicy</th><th>DeletionPolicy</th><th>Reason</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>RDS Instance</strong></td><td>Snapshot</td><td>Snapshot</td><td>Data preservation</td></tr>
+            <tr><td><strong>DynamoDB Table</strong></td><td>Retain</td><td>Retain</td><td>Data preservation</td></tr>
+            <tr><td><strong>S3 Bucket</strong></td><td>Retain</td><td>Retain</td><td>Data preservation</td></tr>
+            <tr><td><strong>EFS File System</strong></td><td>Retain</td><td>Retain</td><td>Data preservation</td></tr>
+            <tr><td><strong>EC2 Instance</strong></td><td>Delete</td><td>Delete</td><td>No data preservation</td></tr>
+            <tr><td><strong>Security Group</strong></td><td>Delete</td><td>Delete</td><td>No data preservation</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Stack Policies</h3>
+      <p>Stack policies lock down what update operations are permitted on resources, adding a layer of defense beyond the template itself.</p>
+      <div class="callout warning"><div><span class="callout-title">Warning</span><p>Stack policies apply only to stack updates. They do not prevent deletion of the stack. Use termination protection for that, and use <code>DeletionPolicy</code>/<code>UpdateReplacePolicy</code> to control what happens to individual resources.</p></div></div>
+      <p>The table shows the intended effect by resource class. In an actual stack policy, scope statements to logical resource IDs or use a <code>ResourceType</code> condition.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Resource Type</th><th>Allow</th><th>Deny</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>AWS::RDS::DBInstance</td><td><code>Update:Modify</code></td><td><code>Update:Replace</code>, <code>Update:Delete</code></td></tr>
+            <tr><td>AWS::DynamoDB::Table</td><td><code>Update:Modify</code></td><td><code>Update:Replace</code>, <code>Update:Delete</code></td></tr>
+            <tr><td>AWS::S3::Bucket</td><td><code>Update:Modify</code></td><td><code>Update:Replace</code>, <code>Update:Delete</code></td></tr>
+            <tr><td>Other resources</td><td><code>Update:*</code></td><td>&mdash;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="macros-transform">
+      <h2>Macros &amp; Transform</h2>
+      <p>Macros reduce boilerplate and extend template syntax, letting teams express complex patterns with less code. The <code>Transform</code> section declares which macros process the template, enabling shorthand syntax that expands into full CloudFormation resources.</p>
+
+      <h3>AWS Macros</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Macro</th><th>Description</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>AWS::Include</strong></td><td>Insert a valid key-value snippet from an S3 URI</td><td>Reuse boilerplate snippets</td></tr>
+            <tr><td><strong>AWS::Serverless</strong></td><td>SAM template transformation</td><td>Serverless apps</td></tr>
+            <tr><td><strong>Custom macros</strong></td><td>Lambda-based transformations</td><td>Custom logic</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Transform Section</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Transform</th><th>Description</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>AWS::Serverless-2016-10-31</strong></td><td>SAM transformation</td><td>Lambda, API Gateway</td></tr>
+            <tr><td><strong>AWS::Include</strong></td><td>External includes</td><td>Template modularity</td></tr>
+            <tr><td><strong>Custom</strong></td><td>Lambda-backed macros</td><td>Custom transformations</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="monitoring">
+      <h2>Monitoring</h2>
+      <p>Observability turns CloudFormation from a fire-and-forget tool into a governed pipeline. Understanding event types is essential for diagnosing failures, tracking progress, and building automated alerting around stack lifecycle changes.</p>
+
+      <h3>Stack Events</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Event Type</th><th>Meaning</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>CREATE_IN_PROGRESS</td><td>Stack creation started</td><td>Monitor</td></tr>
+            <tr><td>CREATE_COMPLETE</td><td>Stack created successfully</td><td>Verify</td></tr>
+            <tr><td>CREATE_FAILED</td><td>Stack creation failed</td><td>Investigate, fix</td></tr>
+            <tr><td>UPDATE_IN_PROGRESS</td><td>Stack update started</td><td>Monitor</td></tr>
+            <tr><td>UPDATE_COMPLETE</td><td>Stack updated successfully</td><td>Verify</td></tr>
+            <tr><td>UPDATE_ROLLBACK_IN_PROGRESS</td><td>Update failed, rolling back</td><td>Investigate</td></tr>
+            <tr><td>DELETE_IN_PROGRESS</td><td>Stack deletion started</td><td>Verify backups</td></tr>
+            <tr><td>DELETE_COMPLETE</td><td>Stack deleted successfully</td><td>Clean up</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Event Monitoring</h3>
+      <p>Connecting CloudFormation signals to external services turns passive event logs into actionable alerts and automated remediation workflows.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Signal</th><th>Source</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Stack/resource status changes</td><td>EventBridge</td><td>Notify or automate remediation for failure and rollback states</td></tr>
+            <tr><td>Drift-detection status changes</td><td>EventBridge</td><td>Review <code>DRIFTED</code> resources</td></tr>
+            <tr><td>Stack events</td><td>CloudFormation API/console</td><td>Diagnose the first failed resource</td></tr>
+            <tr><td>API activity</td><td>CloudTrail</td><td>Audit who changed stacks, templates, and protection settings</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="cost-optimization">
+      <h2>Cost Optimization</h2>
+      <p>Every CloudFormation design decision carries a cost implication. The strategies below target the most common sources of waste in managed infrastructure.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Strategy</th><th>Description</th><th>Potential Savings</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Terminate on failure</strong></td><td>Delete on CREATE failure</td><td>Prevent orphaned resources</td></tr>
+            <tr><td><strong>DeletionPolicy</strong></td><td>Snapshot vs retain</td><td>Storage cost management</td></tr>
+            <tr><td><strong>Reusable templates/modules</strong></td><td>Standardize patterns without assuming resources are shared at runtime</td><td>Reduce maintenance duplication</td></tr>
+            <tr><td><strong>Conditional resources</strong></td><td>Create only when needed</td><td>Resource cost reduction</td></tr>
+            <tr><td><strong>Tagging</strong></td><td>Cost allocation tags</td><td>Cost tracking</td></tr>
+            <tr><td><strong>Cleanup stacks</strong></td><td>Delete unused stacks</td><td>Eliminate costs</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="cross-service-integration">
+      <h2>Cross-Service Integration</h2>
+      <p>CloudFormation rarely operates in isolation. Integrating with these AWS services turns static templates into a governed, observable, and automated infrastructure pipeline.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Service</th><th>Integration</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>CloudFormation StackSets</td><td>Multi-account, multi-region</td><td>Enterprise deployments</td></tr>
+            <tr><td>Service Catalog</td><td>Product deployment</td><td>Self-service</td></tr>
+            <tr><td>CodePipeline</td><td>Automated deployments</td><td>CI/CD — see <a href="../DevOps/CI-CD-Best-Practices.html">CI/CD Best Practices</a></td></tr>
+            <tr><td>CloudWatch</td><td>Rollback-trigger alarms</td><td>Automated rollback protection</td></tr>
+            <tr><td>Config</td><td>Compliance rules</td><td>Governance</td></tr>
+            <tr><td>Systems Manager</td><td>Parameter integration</td><td>Configuration</td></tr>
+            <tr><td>Lambda</td><td>Custom resources</td><td>Extension — see <a href="../Serverless/Lambda-Best-Practices.html">Lambda Best Practices</a></td></tr>
+            <tr><td>SNS</td><td>Stack event notifications</td><td>Alerts</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="additional-practices">
+      <h2>Additional Best Practices</h2>
+      <ul>
+        <li>Enable termination protection for critical stacks and set explicit <code>DeletionPolicy</code> and <code>UpdateReplacePolicy</code> values for stateful resources.</li>
+        <li>Use rollback triggers tied to CloudWatch alarms for high-risk updates, and retain enough monitoring time to detect regressions. See <a href="../Monitoring/CloudWatch-Best-Practices.html">CloudWatch Best Practices</a>.</li>
+        <li>Validate templates with <code>cfn-lint</code>; use CloudFormation Guard or Hooks for organizational policy enforcement.</li>
+        <li>Avoid hard-coding secrets or sensitive parameter defaults. Use Secrets Manager or Parameter Store dynamic references and mark sensitive parameters <code>NoEcho</code>.</li>
+        <li>Pin nested templates and modules to immutable, versioned artifacts; review macro-expanded templates because macros can transform the entire template.</li>
+      </ul>
+      <div class="callout note"><div><span class="callout-title">Note</span><p><code>NoEcho</code> does not redact values placed in metadata or outputs — keep those free of sensitive data as well.</p></div></div>
+    </section>
+
+    <section class="sec" id="references">
+      <h2>AWS References</h2>
+      <ul>
+        <li><a href="https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/template-anatomy.html">CloudFormation template anatomy</a></li>
+        <li><a href="https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/parameters-section-structure.html">CloudFormation parameter types</a></li>
+        <li><a href="https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/eventbridge-integration.html">Monitoring CloudFormation events with EventBridge</a></li>
+        <li><a href="https://docs.aws.amazon.com/cloudformation-cli/latest/hooks-userguide/hooks-concepts.html">CloudFormation Hooks concepts</a></li>
+        <li><a href="https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/protect-stack-resources.html">Protecting resources during stack updates</a></li>
+      </ul>
+    </section>
+
+  </article>
+</main>
+
+<footer class="site-footer">
+  <nav class="pager" aria-label="Adjacent pages">
+    <a class="pager-card prev" href="../DevOps/CI-CD-Best-Practices.html"><span class="pager-label">&larr; Previous</span><span class="pager-title">CI/CD Best Practices</span></a>
+    <a class="pager-card next" href="../DevOps/ECS-EKS-Best-Practices.html"><span class="pager-label">Next &rarr;</span><span class="pager-title">ECS/EKS Best Practices</span></a>
+  </nav>
+  <div class="topics">
+    <div class="topic-group">
+      <h4>Core Services</h4>
+        <a href="../Core-Services/EC2-Best-Practices.html">EC2</a>
+        <a href="../Core-Services/S3-Best-Practices.html">S3</a>
+        <a href="../Core-Services/IAM-Best-Practices.html">IAM</a>
+        <a href="../Core-Services/VPC-Best-Practices.html">VPC</a>
+    </div>
+    <div class="topic-group">
+      <h4>Database</h4>
+        <a href="../Database/RDS-Best-Practices.html">RDS</a>
+        <a href="../Database/DynamoDB-Best-Practices.html">DynamoDB</a>
+        <a href="../Database/ElastiCache-Best-Practices.html">ElastiCache</a>
+    </div>
+    <div class="topic-group">
+      <h4>Architecture Patterns</h4>
+        <a href="../Design/01-event-driven-patterns.html">Event-driven</a>
+        <a href="../Design/02-communication-patterns.html">Communication</a>
+        <a href="../Design/03-error-handling-patterns.html">Error handling</a>
+        <a href="../Design/04-cross-cutting-patterns.html">Cross-cutting</a>
+        <a href="../Design/05-database-integration-patterns.html">Database integration</a>
+        <a href="../Design/06-high-availability-dr-patterns.html">High availability &amp; DR</a>
+        <a href="../Design/07-caching-content-delivery-patterns.html">Caching &amp; delivery</a>
+        <a href="../Design/08-compute-deployment-patterns.html">Compute &amp; deployment</a>
+        <a href="../Design/09-multi-account-landing-zone-patterns.html">Multi-account</a>
+    </div>
+    <div class="topic-group">
+      <h4>Serverless</h4>
+        <a href="../Serverless/Lambda-Best-Practices.html">Lambda</a>
+        <a href="../Serverless/API-Gateway-Best-Practices.html">API Gateway</a>
+        <a href="../Serverless/EventBridge-Best-Practices.html">EventBridge</a>
+    </div>
+    <div class="topic-group">
+      <h4>Networking</h4>
+        <a href="../Networking/CloudFront-Best-Practices.html">CloudFront</a>
+        <a href="../Networking/Route53-Best-Practices.html">Route 53</a>
+        <a href="../Networking/Load-Balancing-Best-Practices.html">Load balancing</a>
+    </div>
+    <div class="topic-group">
+      <h4>DevOps</h4>
+        <a href="../DevOps/CI-CD-Best-Practices.html">CI/CD</a>
+        <a href="../DevOps/CloudFormation-Best-Practices.html" aria-current="page">CloudFormation</a>
+        <a href="../DevOps/ECS-EKS-Best-Practices.html">ECS/EKS</a>
+    </div>
+    <div class="topic-group">
+      <h4>Monitoring</h4>
+        <a href="../Monitoring/CloudWatch-Best-Practices.html">CloudWatch</a>
+        <a href="../Monitoring/X-Ray-Best-Practices.html">X-Ray</a>
+    </div>
+    <div class="topic-group">
+      <h4>Security</h4>
+        <a href="../Security/WAF-Best-Practices.html">WAF</a>
+        <a href="../Security/KMS-Best-Practices.html">KMS</a>
+        <a href="../Security/Shield-Best-Practices.html">Shield</a>
+    </div>
+    <div class="topic-group">
+      <h4>Cost Optimization</h4>
+        <a href="../Cost-Optimization/Cost-Optimization.html">Guide</a>
+    </div>
+  </div>
+  <p class="foot-note">Community-maintained guidance. Verify service details against current AWS documentation before production use.</p>
+</footer>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Route 53 Best Practices — AWS Best Practices</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("aws-docs-theme-v2") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");</script>
+  <link rel="stylesheet" href="../assets/css/site.css">
+</head>
+<body>
+<div id="scroll-progress"></div>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><span class="brand-dot"></span>AWS Best Practices</a>
+    <nav class="header-actions" aria-label="Site actions">
+      <a class="gh-link" href="https://github.com/AlexanderBesss/AWS_best_praactices" target="_blank" rel="noopener">GitHub</a>
+      <button class="theme-btn" type="button" aria-label="Toggle color theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+  <article class="doc">
+    <section class="hero">
+      <h1>Route 53 <span class="accent">Best Practices</span></h1>
+      <p class="lede">A well-designed DNS strategy is the foundation of reliable, performant, and secure service delivery. Because DNS sits at the entry point of every request, your choices around routing, health evaluation, and resilience directly affect availability, latency, and the user experience.</p>
+      <div class="chips">
+        <a class="chip" href="#routing-policies">Routing policies</a>
+        <a class="chip" href="#health-checks">Health checks</a>
+        <a class="chip" href="#record-types">Record types</a>
+        <a class="chip" href="#dnssec">DNSSEC</a>
+        <a class="chip" href="#cost-optimization">Cost optimization</a>
+      </div>
+    </section>
+
+    <nav class="toc">
+      <p class="toc-title">On this page</p>
+      <ul>
+        <li><a href="#routing-policies">Routing Policies</a></li>
+        <li><a href="#health-checks">Health Checks</a></li>
+        <li><a href="#record-types">Record Types</a></li>
+        <li><a href="#private-hosted-zones">Private Hosted Zones</a></li>
+        <li><a href="#dnssec">DNSSEC</a></li>
+        <li><a href="#application-recovery-controller">Application Recovery Controller (ARC)</a></li>
+        <li><a href="#traffic-flow">Traffic Flow</a></li>
+        <li><a href="#monitoring">Monitoring</a></li>
+        <li><a href="#cost-optimization">Cost Optimization</a></li>
+        <li><a href="#cross-service-integration">Cross-Service Integration</a></li>
+      </ul>
+    </nav>
+
+    <section class="sec" id="routing-policies">
+      <h2>Routing Policies</h2>
+      <p>Each routing policy encodes a different traffic-selection strategy; picking the right one determines how requests reach your endpoints.</p>
+
+      <h3>Policy comparison</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Policy</th><th>Core behavior</th><th>Health-check aware</th><th>Use case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Simple</strong></td><td>Return one or more values without policy-specific selection</td><td>No</td><td>Single resource or basic multi-answer DNS</td></tr>
+            <tr><td><strong>Failover</strong></td><td>Return primary unless unhealthy, then secondary</td><td>Yes</td><td>Active-passive HA</td></tr>
+            <tr><td><strong>Latency</strong></td><td>Select the record for the AWS Region with lowest measured network latency</td><td>Yes</td><td>Global low-latency</td></tr>
+            <tr><td><strong>Multi-value answer</strong></td><td>Return up to eight healthy values selected from a larger set</td><td>Yes</td><td>DNS-level availability across multiple endpoints; not a load-balancer replacement</td></tr>
+            <tr><td><strong>Weighted</strong></td><td>Select records in proportion to configured weights</td><td>Yes</td><td>A/B testing, migration</td></tr>
+            <tr><td><strong>Geolocation</strong></td><td>Select by the request's geographic origin, with a default fallback record</td><td>Yes</td><td>Localization and geographic routing</td></tr>
+            <tr><td><strong>Geoproximity</strong></td><td>Select by resource/user location and optional bias</td><td>Yes</td><td>Shift geographic boundaries between resources</td></tr>
+            <tr><td><strong>IP-based</strong></td><td>Select by configured CIDR collection</td><td>Yes</td><td>Route known client networks differently</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Policy selection matrix</h3>
+      <p>This matrix maps common requirements to the policy that satisfies them most directly.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Requirement</th><th>Recommended policy</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Single endpoint, no HA</td><td>Simple</td></tr>
+            <tr><td>Active-passive failover</td><td>Failover</td></tr>
+            <tr><td>Global low-latency</td><td>Latency</td></tr>
+            <tr><td>A/B testing</td><td>Weighted</td></tr>
+            <tr><td>Geographic restriction</td><td>Geolocation</td></tr>
+            <tr><td>Simple multi-endpoint HA</td><td>Multi-Value</td></tr>
+            <tr><td>Custom geo-distribution</td><td>Geoproximity</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="health-checks">
+      <h2>Health Checks</h2>
+      <p>Health checks are the mechanism Route 53 uses to determine whether an endpoint is serving traffic, so selecting the right type matters for accuracy and cost.</p>
+
+      <h3>Health check types</h3>
+      <div class="card-grid">
+        <div class="card">
+          <h3>Endpoint</h3>
+          <p>HTTP/HTTPS, TCP, or HTTPS with string matching. Best for application health.</p>
+        </div>
+        <div class="card">
+          <h3>CloudWatch Alarm</h3>
+          <p>Based on a CloudWatch metric. Best for custom health criteria.</p>
+        </div>
+        <div class="card">
+          <h3>Calculated Health Check</h3>
+          <p>Combine multiple child health checks with AND/OR/NOT logic. Best for complex health logic.</p>
+        </div>
+      </div>
+
+      <h3>Health check configuration</h3>
+      <p>These settings control how Route 53 probes your endpoints; tuning them balances detection speed, accuracy, and cost.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Setting</th><th>Recommendation</th><th>Reason</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Interval</strong></td><td>30 seconds (default) or 10 seconds</td><td>Faster detection vs cost</td></tr>
+            <tr><td><strong>Failed thresholds</strong></td><td>3 (default)</td><td>Balance false positives/negatives</td></tr>
+            <tr><td><strong>Regions</strong></td><td>At least 3</td><td>Global health assessment</td></tr>
+            <tr><td><strong>Protocol</strong></td><td>Match the endpoint and failure mode being tested; use HTTPS when the TLS path must be exercised</td><td>Test the actual serving path (Route 53 health checks do not validate the endpoint certificate)</td></tr>
+            <tr><td><strong>Port</strong></td><td>Application port</td><td>Check actual service</td></tr>
+            <tr><td><strong>Resource path</strong></td><td>Health endpoint</td><td>Lightweight check</td></tr>
+            <tr><td><strong>Search string</strong></td><td>Expected response</td><td>Validate response content</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Health check best practices</h3>
+      <p>Implementing these practices ensures health checks provide reliable signals without introducing noise or unnecessary expense.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Practice</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Dedicated health endpoint</strong></td><td>Lightweight, fast response</td></tr>
+            <tr><td><strong>Multiple regions</strong></td><td>At least 3 for accuracy</td></tr>
+            <tr><td><strong>Alarm integration</strong></td><td>CloudWatch alarms for notification</td></tr>
+            <tr><td><strong>Failover testing</strong></td><td>Regular failover drills</td></tr>
+            <tr><td><strong>Cost awareness</strong></td><td>Health-check pricing varies by endpoint type and optional features; verify current pricing before multiplying checks across records/Regions</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <figure class="diagram">
+        <span class="code-lang">diagram</span>
+        <div class="mermaid" data-mode="light"><svg id="r_default_24_0" width="100%" xmlns="http://www.w3.org/2000/svg" class="flowchart" style="max-width: 984.828125px;" viewBox="0 -0.000003814697265625 984.828125 335.5733642578125" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#r_default_24_0{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#333;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#r_default_24_0 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#r_default_24_0 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#r_default_24_0 .error-icon{fill:#552222;}#r_default_24_0 .error-text{fill:#552222;stroke:#552222;}#r_default_24_0 .edge-thickness-normal{stroke-width:1px;}#r_default_24_0 .edge-thickness-thick{stroke-width:3.5px;}#r_default_24_0 .edge-pattern-solid{stroke-dasharray:0;}#r_default_24_0 .edge-thickness-invisible{stroke-width:0;fill:none;}#r_default_24_0 .edge-pattern-dashed{stroke-dasharray:3;}#r_default_24_0 .edge-pattern-dotted{stroke-dasharray:2;}#r_default_24_0 .marker{fill:#333333;stroke:#333333;}#r_default_24_0 .marker.cross{stroke:#333333;}#r_default_24_0 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#r_default_24_0 p{margin:0;}#r_default_24_0 .label{font-family:"trebuchet ms",verdana,arial,sans-serif;color:#333;}#r_default_24_0 .cluster-label text{fill:#333;}#r_default_24_0 .cluster-label span{color:#333;}#r_default_24_0 .cluster-label span p{background-color:transparent;}#r_default_24_0 .label text,#r_default_24_0 span{fill:#333;color:#333;}#r_default_24_0 .node rect,#r_default_24_0 .node circle,#r_default_24_0 .node ellipse,#r_default_24_0 .node polygon,#r_default_24_0 .node path{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}#r_default_24_0 .rough-node .label text,#r_default_24_0 .node .label text,#r_default_24_0 .image-shape .label,#r_default_24_0 .icon-shape .label{text-anchor:middle;}#r_default_24_0 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#r_default_24_0 .rough-node .label,#r_default_24_0 .node .label,#r_default_24_0 .image-shape .label,#r_default_24_0 .icon-shape .label{text-align:center;}#r_default_24_0 .node.clickable{cursor:pointer;}#r_default_24_0 .root .anchor path{fill:#333333!important;stroke-width:0;stroke:#333333;}#r_default_24_0 .arrowheadPath{fill:#333333;}#r_default_24_0 .edgePaths .path{stroke:#333333;stroke-width:1px;}#r_default_24_0 .flowchart-link{stroke:#333333;fill:none;}#r_default_24_0 .edgeLabel{background-color:rgba(232,232,232, 0.8);text-align:center;}#r_default_24_0 .edgeLabel p{background-color:rgba(232,232,232, 0.8);}#r_default_24_0 .edgeLabel rect{opacity:0.5;background-color:rgba(232,232,232, 0.8);fill:rgba(232,232,232, 0.8);}#r_default_24_0 .labelBkg{background-color:rgba(232, 232, 232, 0.5);}#r_default_24_0 .cluster rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}#r_default_24_0 .cluster text{fill:#333;}#r_default_24_0 .cluster span{color:#333;}#r_default_24_0 .node .collapsed-indicator{fill:#aaaa33;stroke:none;opacity:0.6;}#r_default_24_0 .node .collapsed-separator{stroke:#aaaa33;stroke-width:0.75px;}#r_default_24_0 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:12px;background:hsl(80, 100%, 96.2745098039%);border:1px solid #aaaa33;border-radius:2px;pointer-events:none;z-index:100;}#r_default_24_0 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#333;}#r_default_24_0 rect.text{fill:none;stroke-width:0;}#r_default_24_0 .icon-shape,#r_default_24_0 .image-shape{background-color:rgba(232,232,232, 0.8);text-align:center;}#r_default_24_0 .icon-shape p,#r_default_24_0 .image-shape p{background-color:rgba(232,232,232, 0.8);padding:2px;}#r_default_24_0 .icon-shape .label rect,#r_default_24_0 .image-shape .label rect{opacity:0.5;background-color:rgba(232,232,232, 0.8);fill:rgba(232,232,232, 0.8);}#r_default_24_0 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#r_default_24_0 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#r_default_24_0 .node .neo-node{stroke:#9370DB;}#r_default_24_0 [data-look="neo"].node rect,#r_default_24_0 [data-look="neo"].cluster rect,#r_default_24_0 [data-look="neo"].node polygon{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_24_0 [data-look="neo"].swimlane.cluster rect{filter:none;}#r_default_24_0 [data-look="neo"].node path{stroke:#9370DB;stroke-width:1px;}#r_default_24_0 [data-look="neo"].node .outer-path{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_24_0 [data-look="neo"].node .neo-line path{stroke:#9370DB;filter:none;}#r_default_24_0 [data-look="neo"].node circle{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_24_0 [data-look="neo"].node circle .state-start{fill:#000000;}#r_default_24_0 [data-look="neo"].icon-shape .icon{fill:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_24_0 [data-look="neo"].icon-shape .icon-neo path{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_24_0 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="r_default_24_0_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_24_0_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_24_0_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_24_0_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></polygon></marker><marker id="r_default_24_0_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_24_0_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_24_0_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_24_0_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_24_0_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_24_0_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_24_0_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"></path></marker><marker id="r_default_24_0_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"></path></marker><g class="root"><g class="clusters"></g><g class="edgePaths"><path d="M183.633,48.917L192.896,48.917C202.159,48.917,220.685,48.917,246.031,61.761C271.378,74.604,303.545,100.292,319.628,113.136L335.712,125.979" id="r_default_24_0-L_HC1_R53_0" class="edge-thickness-normal edge-pattern-dotted edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_HC1_R53_0" data-points="W3sieCI6MTgzLjYzMjgxMjUsInkiOjQ4LjkxNjc5MzgyMzI0MjE5fSx7IngiOjIzOS4yMTA5Mzc1LCJ5Ijo0OC45MTY3OTM4MjMyNDIxOX0seyJ4IjozMzguODM3NTUxNDQ5OTg0ODYsInkiOjEyOC40NzUyOTU2ODc0NjYzNH1d" data-look="classic" marker-end="url(#r_default_24_0_flowchart-v2-pointEnd)"></path><path d="M192.813,181.703L200.546,181.703C208.279,181.703,223.745,181.703,238.544,181.703C253.344,181.703,267.477,181.703,274.543,181.703L281.609,181.703" id="r_default_24_0-L_HC2_R53_0" class="edge-thickness-normal edge-pattern-dotted edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_HC2_R53_0" data-points="W3sieCI6MTkyLjgxMjUsInkiOjE4MS43MDM0NzIxMzc0NTExN30seyJ4IjoyMzkuMjEwOTM3NSwieSI6MTgxLjcwMzQ3MjEzNzQ1MTE3fSx7IngiOjI4NS42MDkzNzUsInkiOjE4MS43MDM0NzIxMzc0NTExN31d" data-look="classic" marker-end="url(#r_default_24_0_flowchart-v2-pointEnd)"></path><path d="M166.922,300.573L178.97,300.573C191.018,300.573,215.115,300.573,242.683,289.479C270.251,278.384,301.291,256.194,316.811,245.1L332.33,234.005" id="r_default_24_0-L_Q_R53_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_Q_R53_0" data-points="W3sieCI6MTY2LjkyMTg3NSwieSI6MzAwLjU3MzM1NjYyODQxNzk3fSx7IngiOjIzOS4yMTA5Mzc1LCJ5IjozMDAuNTczMzU2NjI4NDE3OTd9LHsieCI6MzM1LjU4NDQ3MzY0MjkyMjIsInkiOjIzMS42Nzg1NzA3ODAzNzMzMn1d" data-look="classic" marker-end="url(#r_default_24_0_flowchart-v2-pointEnd)"></path><path d="M504.377,160.706L528.71,155.539C553.043,150.372,601.709,140.038,647.737,134.87C693.766,129.703,737.156,129.703,758.852,129.703L780.547,129.703" id="r_default_24_0-L_R53_P1_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_R53_P1_0" data-points="W3sieCI6NTA0LjM3NzEzMTUyMjg1NDY1LCJ5IjoxNjAuNzA1NjAzNjYwMzA1ODN9LHsieCI6NjUwLjM3NSwieSI6MTI5LjcwMzQ3MjEzNzQ1MTE3fSx7IngiOjc4NC41NDY4NzUsInkiOjEyOS43MDM0NzIxMzc0NTExN31d" data-look="classic" marker-end="url(#r_default_24_0_flowchart-v2-pointEnd)"></path><path d="M504.377,202.701L528.71,207.868C553.043,213.035,601.709,223.369,646.209,228.536C690.708,233.703,731.042,233.703,751.208,233.703L771.375,233.703" id="r_default_24_0-L_R53_S1_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_R53_S1_0" data-points="W3sieCI6NTA0LjM3NzEzMTUyMjg1NDY1LCJ5IjoyMDIuNzAxMzQwNjE0NTk2NTJ9LHsieCI6NjUwLjM3NSwieSI6MjMzLjcwMzQ3MjEzNzQ1MTE3fSx7IngiOjc3NS4zNzUsInkiOjIzMy43MDM0NzIxMzc0NTExN31d" data-look="classic" marker-end="url(#r_default_24_0_flowchart-v2-pointEnd)"></path></g><g class="edgeLabels"><g class="edgeLabel" transform="translate(239.2109375, 48.91679382324219)"><g class="label" data-id="L_HC1_R53_0" transform="translate(-21.3984375, -12)"><foreignObject width="42.796875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>status</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(239.2109375, 181.70347213745117)"><g class="label" data-id="L_HC2_R53_0" transform="translate(-21.3984375, -12)"><foreignObject width="42.796875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>status</p></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_Q_R53_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(650.375, 129.70347213745117)"><g class="label" data-id="L_R53_P1_0" transform="translate(-56.5703125, -12)"><foreignObject width="113.140625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>Primary healthy</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(650.375, 233.70347213745117)"><g class="label" data-id="L_R53_S1_0" transform="translate(-100, -24)"><foreignObject width="200" height="48"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="edgeLabel"><p>Primary unhealthy and secondary healthy</p></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default" id="r_default_24_0-flowchart-HC1-0" data-look="classic" transform="translate(100.40625, 48.91679382324219)"><path d="M0,14.277864150538788 a83.2265625,14.277864150538788 0,0,0 166.453125,0 a83.2265625,14.277864150538788 0,0,0 -166.453125,0 l0,53.27786415053879 a83.2265625,14.277864150538788 0,0,0 166.453125,0 l0,-53.27786415053879" class="basic label-container outer-path" style="" transform="translate(-83.2265625, -40.916796225808184)"></path><g class="label" style="" transform="translate(-75.7265625, -2)"><rect></rect><foreignObject width="151.453125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Primary health check</p></span></div></foreignObject></g></g><g class="node default" id="r_default_24_0-flowchart-R53-1" data-look="classic" transform="translate(405.4921875, 181.70347213745117)"><polygon points="119.8828125,0 239.765625,-119.8828125 119.8828125,-239.765625 0,-119.8828125" class="label-container" transform="translate(-119.3828125, 119.8828125)"></polygon><g class="label" style="" transform="translate(-92.8828125, -12)"><rect></rect><foreignObject width="185.765625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Route 53 failover decision</p></span></div></foreignObject></g></g><g class="node default" id="r_default_24_0-flowchart-HC2-2" data-look="classic" transform="translate(100.40625, 181.70347213745117)"><path d="M0,14.913253984264676 a92.40625,14.913253984264676 0,0,0 184.8125,0 a92.40625,14.913253984264676 0,0,0 -184.8125,0 l0,53.91325398426468 a92.40625,14.913253984264676 0,0,0 184.8125,0 l0,-53.91325398426468" class="basic label-container outer-path" style="" transform="translate(-92.40625, -41.86988097639701)"></path><g class="label" style="" transform="translate(-84.90625, -2)"><rect></rect><foreignObject width="169.8125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Secondary health check</p></span></div></foreignObject></g></g><g class="node default" id="r_default_24_0-flowchart-Q-4" data-look="classic" transform="translate(100.40625, 300.57335662841797)"><rect class="basic label-container" style="" x="-66.515625" y="-27" width="133.03125" height="54"></rect><g class="label" style="" transform="translate(-36.515625, -12)"><rect></rect><foreignObject width="73.03125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>DNS query</p></span></div></foreignObject></g></g><g class="node default" id="r_default_24_0-flowchart-P1-7" data-look="classic" transform="translate(876.1015625, 129.70347213745117)"><rect class="basic label-container" style="" x="-91.5546875" y="-27" width="183.109375" height="54"></rect><g class="label" style="" transform="translate(-61.5546875, -12)"><rect></rect><foreignObject width="123.109375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Primary endpoint</p></span></div></foreignObject></g></g><g class="node default" id="r_default_24_0-flowchart-S1-9" data-look="classic" transform="translate(876.1015625, 233.70347213745117)"><rect class="basic label-container" style="" x="-100.7265625" y="-27" width="201.453125" height="54"></rect><g class="label" style="" transform="translate(-70.7265625, -12)"><rect></rect><foreignObject width="141.453125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Secondary endpoint</p></span></div></foreignObject></g></g></g></g></g><defs><filter id="r_default_24_0-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs><defs><filter id="r_default_24_0-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs></svg></div>
+        <div class="mermaid" data-mode="dark"><svg id="r_dark_24_0" width="100%" xmlns="http://www.w3.org/2000/svg" class="flowchart" style="max-width: 984.828125px;" viewBox="0 -0.000003814697265625 984.828125 335.5733642578125" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#r_dark_24_0{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#ccc;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#r_dark_24_0 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#r_dark_24_0 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#r_dark_24_0 .error-icon{fill:#a44141;}#r_dark_24_0 .error-text{fill:#ddd;stroke:#ddd;}#r_dark_24_0 .edge-thickness-normal{stroke-width:1px;}#r_dark_24_0 .edge-thickness-thick{stroke-width:3.5px;}#r_dark_24_0 .edge-pattern-solid{stroke-dasharray:0;}#r_dark_24_0 .edge-thickness-invisible{stroke-width:0;fill:none;}#r_dark_24_0 .edge-pattern-dashed{stroke-dasharray:3;}#r_dark_24_0 .edge-pattern-dotted{stroke-dasharray:2;}#r_dark_24_0 .marker{fill:lightgrey;stroke:lightgrey;}#r_dark_24_0 .marker.cross{stroke:lightgrey;}#r_dark_24_0 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#r_dark_24_0 p{margin:0;}#r_dark_24_0 .label{font-family:"trebuchet ms",verdana,arial,sans-serif;color:#ccc;}#r_dark_24_0 .cluster-label text{fill:#F9FFFE;}#r_dark_24_0 .cluster-label span{color:#F9FFFE;}#r_dark_24_0 .cluster-label span p{background-color:transparent;}#r_dark_24_0 .label text,#r_dark_24_0 span{fill:#ccc;color:#ccc;}#r_dark_24_0 .node rect,#r_dark_24_0 .node circle,#r_dark_24_0 .node ellipse,#r_dark_24_0 .node polygon,#r_dark_24_0 .node path{fill:#1f2020;stroke:#ccc;stroke-width:1px;}#r_dark_24_0 .rough-node .label text,#r_dark_24_0 .node .label text,#r_dark_24_0 .image-shape .label,#r_dark_24_0 .icon-shape .label{text-anchor:middle;}#r_dark_24_0 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#r_dark_24_0 .rough-node .label,#r_dark_24_0 .node .label,#r_dark_24_0 .image-shape .label,#r_dark_24_0 .icon-shape .label{text-align:center;}#r_dark_24_0 .node.clickable{cursor:pointer;}#r_dark_24_0 .root .anchor path{fill:lightgrey!important;stroke-width:0;stroke:lightgrey;}#r_dark_24_0 .arrowheadPath{fill:lightgrey;}#r_dark_24_0 .edgePaths .path{stroke:lightgrey;stroke-width:1px;}#r_dark_24_0 .flowchart-link{stroke:lightgrey;fill:none;}#r_dark_24_0 .edgeLabel{background-color:hsl(0, 0%, 34.4117647059%);text-align:center;}#r_dark_24_0 .edgeLabel p{background-color:hsl(0, 0%, 34.4117647059%);}#r_dark_24_0 .edgeLabel rect{opacity:0.5;background-color:hsl(0, 0%, 34.4117647059%);fill:hsl(0, 0%, 34.4117647059%);}#r_dark_24_0 .labelBkg{background-color:rgba(87.75, 87.75, 87.75, 0.5);}#r_dark_24_0 .cluster rect{fill:hsl(180, 1.5873015873%, 28.3529411765%);stroke:rgba(255, 255, 255, 0.25);stroke-width:1px;}#r_dark_24_0 .cluster text{fill:#F9FFFE;}#r_dark_24_0 .cluster span{color:#F9FFFE;}#r_dark_24_0 .node .collapsed-indicator{fill:rgba(255, 255, 255, 0.25);stroke:none;opacity:0.6;}#r_dark_24_0 .node .collapsed-separator{stroke:rgba(255, 255, 255, 0.25);stroke-width:0.75px;}#r_dark_24_0 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:12px;background:hsl(20, 1.5873015873%, 12.3529411765%);border:1px solid rgba(255, 255, 255, 0.25);border-radius:2px;pointer-events:none;z-index:100;}#r_dark_24_0 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#ccc;}#r_dark_24_0 rect.text{fill:none;stroke-width:0;}#r_dark_24_0 .icon-shape,#r_dark_24_0 .image-shape{background-color:hsl(0, 0%, 34.4117647059%);text-align:center;}#r_dark_24_0 .icon-shape p,#r_dark_24_0 .image-shape p{background-color:hsl(0, 0%, 34.4117647059%);padding:2px;}#r_dark_24_0 .icon-shape .label rect,#r_dark_24_0 .image-shape .label rect{opacity:0.5;background-color:hsl(0, 0%, 34.4117647059%);fill:hsl(0, 0%, 34.4117647059%);}#r_dark_24_0 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#r_dark_24_0 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#r_dark_24_0 .node .neo-node{stroke:#ccc;}#r_dark_24_0 [data-look="neo"].node rect,#r_dark_24_0 [data-look="neo"].cluster rect,#r_dark_24_0 [data-look="neo"].node polygon{stroke:url(#r_dark_24_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_24_0 [data-look="neo"].swimlane.cluster rect{filter:none;}#r_dark_24_0 [data-look="neo"].node path{stroke:url(#r_dark_24_0-gradient);stroke-width:1px;}#r_dark_24_0 [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_24_0 [data-look="neo"].node .neo-line path{stroke:#ccc;filter:none;}#r_dark_24_0 [data-look="neo"].node circle{stroke:url(#r_dark_24_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_24_0 [data-look="neo"].node circle .state-start{fill:#000000;}#r_dark_24_0 [data-look="neo"].icon-shape .icon{fill:url(#r_dark_24_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_24_0 [data-look="neo"].icon-shape .icon-neo path{stroke:url(#r_dark_24_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_24_0 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="r_dark_24_0_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_24_0_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_24_0_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_24_0_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></polygon></marker><marker id="r_dark_24_0_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_24_0_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_24_0_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_24_0_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_24_0_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_24_0_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_24_0_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"></path></marker><marker id="r_dark_24_0_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"></path></marker><g class="root"><g class="clusters"></g><g class="edgePaths"><path d="M183.633,48.917L192.896,48.917C202.159,48.917,220.685,48.917,246.031,61.761C271.378,74.604,303.545,100.292,319.628,113.136L335.712,125.979" id="r_dark_24_0-L_HC1_R53_0" class="edge-thickness-normal edge-pattern-dotted edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_HC1_R53_0" data-points="W3sieCI6MTgzLjYzMjgxMjUsInkiOjQ4LjkxNjc5MzgyMzI0MjE5fSx7IngiOjIzOS4yMTA5Mzc1LCJ5Ijo0OC45MTY3OTM4MjMyNDIxOX0seyJ4IjozMzguODM3NTUxNDQ5OTg0ODYsInkiOjEyOC40NzUyOTU2ODc0NjYzNH1d" data-look="classic" marker-end="url(#r_dark_24_0_flowchart-v2-pointEnd)"></path><path d="M192.813,181.703L200.546,181.703C208.279,181.703,223.745,181.703,238.544,181.703C253.344,181.703,267.477,181.703,274.543,181.703L281.609,181.703" id="r_dark_24_0-L_HC2_R53_0" class="edge-thickness-normal edge-pattern-dotted edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_HC2_R53_0" data-points="W3sieCI6MTkyLjgxMjUsInkiOjE4MS43MDM0NzIxMzc0NTExN30seyJ4IjoyMzkuMjEwOTM3NSwieSI6MTgxLjcwMzQ3MjEzNzQ1MTE3fSx7IngiOjI4NS42MDkzNzUsInkiOjE4MS43MDM0NzIxMzc0NTExN31d" data-look="classic" marker-end="url(#r_dark_24_0_flowchart-v2-pointEnd)"></path><path d="M166.922,300.573L178.97,300.573C191.018,300.573,215.115,300.573,242.683,289.479C270.251,278.384,301.291,256.194,316.811,245.1L332.33,234.005" id="r_dark_24_0-L_Q_R53_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_Q_R53_0" data-points="W3sieCI6MTY2LjkyMTg3NSwieSI6MzAwLjU3MzM1NjYyODQxNzk3fSx7IngiOjIzOS4yMTA5Mzc1LCJ5IjozMDAuNTczMzU2NjI4NDE3OTd9LHsieCI6MzM1LjU4NDQ3MzY0MjkyMjIsInkiOjIzMS42Nzg1NzA3ODAzNzMzMn1d" data-look="classic" marker-end="url(#r_dark_24_0_flowchart-v2-pointEnd)"></path><path d="M504.377,160.706L528.71,155.539C553.043,150.372,601.709,140.038,647.737,134.87C693.766,129.703,737.156,129.703,758.852,129.703L780.547,129.703" id="r_dark_24_0-L_R53_P1_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_R53_P1_0" data-points="W3sieCI6NTA0LjM3NzEzMTUyMjg1NDY1LCJ5IjoxNjAuNzA1NjAzNjYwMzA1ODN9LHsieCI6NjUwLjM3NSwieSI6MTI5LjcwMzQ3MjEzNzQ1MTE3fSx7IngiOjc4NC41NDY4NzUsInkiOjEyOS43MDM0NzIxMzc0NTExN31d" data-look="classic" marker-end="url(#r_dark_24_0_flowchart-v2-pointEnd)"></path><path d="M504.377,202.701L528.71,207.868C553.043,213.035,601.709,223.369,646.209,228.536C690.708,233.703,731.042,233.703,751.208,233.703L771.375,233.703" id="r_dark_24_0-L_R53_S1_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_R53_S1_0" data-points="W3sieCI6NTA0LjM3NzEzMTUyMjg1NDY1LCJ5IjoyMDIuNzAxMzQwNjE0NTk2NTJ9LHsieCI6NjUwLjM3NSwieSI6MjMzLjcwMzQ3MjEzNzQ1MTE3fSx7IngiOjc3NS4zNzUsInkiOjIzMy43MDM0NzIxMzc0NTExN31d" data-look="classic" marker-end="url(#r_dark_24_0_flowchart-v2-pointEnd)"></path></g><g class="edgeLabels"><g class="edgeLabel" transform="translate(239.2109375, 48.91679382324219)"><g class="label" data-id="L_HC1_R53_0" transform="translate(-21.3984375, -12)"><foreignObject width="42.796875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>status</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(239.2109375, 181.70347213745117)"><g class="label" data-id="L_HC2_R53_0" transform="translate(-21.3984375, -12)"><foreignObject width="42.796875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>status</p></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_Q_R53_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(650.375, 129.70347213745117)"><g class="label" data-id="L_R53_P1_0" transform="translate(-56.5703125, -12)"><foreignObject width="113.140625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>Primary healthy</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(650.375, 233.70347213745117)"><g class="label" data-id="L_R53_S1_0" transform="translate(-100, -24)"><foreignObject width="200" height="48"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="edgeLabel"><p>Primary unhealthy and secondary healthy</p></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default" id="r_dark_24_0-flowchart-HC1-0" data-look="classic" transform="translate(100.40625, 48.91679382324219)"><path d="M0,14.277864150538788 a83.2265625,14.277864150538788 0,0,0 166.453125,0 a83.2265625,14.277864150538788 0,0,0 -166.453125,0 l0,53.27786415053879 a83.2265625,14.277864150538788 0,0,0 166.453125,0 l0,-53.27786415053879" class="basic label-container outer-path" style="" transform="translate(-83.2265625, -40.916796225808184)"></path><g class="label" style="" transform="translate(-75.7265625, -2)"><rect></rect><foreignObject width="151.453125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Primary health check</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_24_0-flowchart-R53-1" data-look="classic" transform="translate(405.4921875, 181.70347213745117)"><polygon points="119.8828125,0 239.765625,-119.8828125 119.8828125,-239.765625 0,-119.8828125" class="label-container" transform="translate(-119.3828125, 119.8828125)"></polygon><g class="label" style="" transform="translate(-92.8828125, -12)"><rect></rect><foreignObject width="185.765625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Route 53 failover decision</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_24_0-flowchart-HC2-2" data-look="classic" transform="translate(100.40625, 181.70347213745117)"><path d="M0,14.913253984264676 a92.40625,14.913253984264676 0,0,0 184.8125,0 a92.40625,14.913253984264676 0,0,0 -184.8125,0 l0,53.91325398426468 a92.40625,14.913253984264676 0,0,0 184.8125,0 l0,-53.91325398426468" class="basic label-container outer-path" style="" transform="translate(-92.40625, -41.86988097639701)"></path><g class="label" style="" transform="translate(-84.90625, -2)"><rect></rect><foreignObject width="169.8125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Secondary health check</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_24_0-flowchart-Q-4" data-look="classic" transform="translate(100.40625, 300.57335662841797)"><rect class="basic label-container" style="" x="-66.515625" y="-27" width="133.03125" height="54"></rect><g class="label" style="" transform="translate(-36.515625, -12)"><rect></rect><foreignObject width="73.03125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>DNS query</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_24_0-flowchart-P1-7" data-look="classic" transform="translate(876.1015625, 129.70347213745117)"><rect class="basic label-container" style="" x="-91.5546875" y="-27" width="183.109375" height="54"></rect><g class="label" style="" transform="translate(-61.5546875, -12)"><rect></rect><foreignObject width="123.109375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Primary endpoint</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_24_0-flowchart-S1-9" data-look="classic" transform="translate(876.1015625, 233.70347213745117)"><rect class="basic label-container" style="" x="-100.7265625" y="-27" width="201.453125" height="54"></rect><g class="label" style="" transform="translate(-70.7265625, -12)"><rect></rect><foreignObject width="141.453125" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Secondary endpoint</p></span></div></foreignObject></g></g></g></g></g><defs><filter id="r_dark_24_0-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"></feDropShadow></filter></defs><defs><filter id="r_dark_24_0-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"></feDropShadow></filter></defs><linearGradient id="r_dark_24_0-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#cccccc" stop-opacity="1"></stop><stop offset="100%" stop-color="hsl(180, 0%, 18.3529411765%)" stop-opacity="1"></stop></linearGradient></svg></div>
+      </figure>
+    </section>
+
+    <section class="sec" id="record-types">
+      <h2>Record Types</h2>
+      <p>Choosing the correct record type determines what kind of address or delegation information DNS returns to clients.</p>
+
+      <h3>Supported record types</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Type</th><th>Description</th><th>Use case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>A</strong></td><td>IPv4 address</td><td>Standard web hosting</td></tr>
+            <tr><td><strong>AAAA</strong></td><td>IPv6 address</td><td>IPv6 support</td></tr>
+            <tr><td><strong>CNAME</strong></td><td>Alias to another name</td><td>Subdomain routing</td></tr>
+            <tr><td><strong>DS</strong></td><td>Delegation signer</td><td>DNSSEC chain of trust</td></tr>
+            <tr><td><strong>HTTPS</strong></td><td>HTTPS service binding information</td><td>HTTP endpoint connection hints</td></tr>
+            <tr><td><strong>MX</strong></td><td>Mail server</td><td>Email routing</td></tr>
+            <tr><td><strong>NAPTR</strong></td><td>Naming authority pointer</td><td>SIP, telephony</td></tr>
+            <tr><td><strong>NS</strong></td><td>Name server</td><td>Delegation</td></tr>
+            <tr><td><strong>PTR</strong></td><td>Reverse DNS</td><td>Reverse lookups</td></tr>
+            <tr><td><strong>SOA</strong></td><td>Start of authority</td><td>Zone info</td></tr>
+            <tr><td><strong>SPF</strong></td><td>Legacy SPF record type</td><td>Do not create for SPFv1; publish SPF policy in TXT instead</td></tr>
+            <tr><td><strong>SRV</strong></td><td>Service locator</td><td>Service discovery</td></tr>
+            <tr><td><strong>SSHFP</strong></td><td>SSH public-key fingerprint</td><td>SSH host-key verification with DNSSEC</td></tr>
+            <tr><td><strong>SVCB</strong></td><td>General service binding</td><td>Connection parameters and aliases</td></tr>
+            <tr><td><strong>TLSA</strong></td><td>TLS certificate/key association</td><td>DANE with DNSSEC</td></tr>
+            <tr><td><strong>TXT</strong></td><td>Text record</td><td>Domain verification, DKIM</td></tr>
+            <tr><td><strong>CAA</strong></td><td>Certificate Authority Authorization</td><td>Certificate issuance control</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Alias vs CNAME</h3>
+      <p>An alias is a Route 53 record feature on supported record types (usually A/AAAA), not a DNS record type of its own. Understanding the trade-offs between alias and CNAME helps you minimize extra queries and cost while maintaining flexibility.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>Alias</th><th>CNAME</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Zone apex</strong></td><td>Supported</td><td>Not supported</td></tr>
+            <tr><td><strong>Additional queries</strong></td><td>No (resolved by Route 53)</td><td>Yes (additional DNS query)</td></tr>
+            <tr><td><strong>Cost</strong></td><td>Route 53 does not charge for alias queries to eligible AWS resources; target-service charges can still apply</td><td>Standard Route 53 query charges apply</td></tr>
+            <tr><td><strong>Health checks</strong></td><td>Can evaluate target health for supported alias targets, or use an explicit health check where supported</td><td>Use routing-policy records and health checks rather than relying on the CNAME itself</td></tr>
+            <tr><td><strong>AWS resources</strong></td><td>ELB, CloudFront, S3, etc.</td><td>Any hostname</td></tr>
+            <tr><td><strong>Recommendation</strong></td><td><strong>Prefer Alias for AWS resources</strong></td><td>Use for non-AWS targets</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout tip"><div><span class="callout-title">Tip</span><p>Prefer alias records for eligible AWS resources (ELB, CloudFront, S3, and similar targets). They resolve without an extra DNS query, work at the zone apex, and are not charged by Route 53 as queries.</p></div></div>
+    </section>
+
+    <section class="sec" id="private-hosted-zones">
+      <h2>Private Hosted Zones</h2>
+      <p>Private hosted zones scope DNS resolution to specific VPCs, making these association rules essential for internal name resolution. See also <a href="../Core-Services/VPC-Best-Practices.html">VPC Best Practices</a>.</p>
+
+      <h3>VPC association</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Private zone</strong></td><td>Resolves only in associated VPCs</td></tr>
+            <tr><td><strong>VPC association</strong></td><td>Associate with multiple VPCs</td></tr>
+            <tr><td><strong>Region scope</strong></td><td>A private hosted zone is not Region-bound and can be associated with VPCs in multiple Regions</td></tr>
+            <tr><td><strong>Resolver endpoints</strong></td><td>Share with on-premises</td></tr>
+            <tr><td><strong>Inbound endpoint</strong></td><td>On-premises to VPC resolution</td></tr>
+            <tr><td><strong>Outbound endpoint</strong></td><td>VPC to on-premises resolution</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Use cases</h3>
+      <p>These patterns show how private hosted zones solve real-world internal DNS and hybrid connectivity needs.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Use case</th><th>Configuration</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Internal DNS</strong></td><td>Private zone for internal services</td></tr>
+            <tr><td><strong>Split-horizon DNS</strong></td><td>Different records for public/private</td></tr>
+            <tr><td><strong>On-premises integration</strong></td><td>Resolver endpoints for hybrid DNS</td></tr>
+            <tr><td><strong>Multi-VPC</strong></td><td>Associate zone with multiple VPCs</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warning"><div><span class="callout-title">Warning</span><p>Use Resolver endpoints and rules for hybrid DNS; do not forward private DNS through an internet NAT path.</p></div></div>
+    </section>
+
+    <section class="sec" id="dnssec">
+      <h2>DNSSEC</h2>
+      <p>DNSSEC adds cryptographic signatures to DNS responses; the settings below define how keys are managed and rotated. The customer-managed KSK relies on <a href="../Security/KMS-Best-Practices.html">KMS Best Practices</a>.</p>
+
+      <h3>DNSSEC configuration</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Setting</th><th>Recommendation</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Enable DNSSEC</strong></td><td>For public zones when the registrar/parent-zone chain of trust and operations are ready; test rollover and failure recovery</td></tr>
+            <tr><td><strong>Key signing key (KSK)</strong></td><td>Backed by a customer-managed asymmetric KMS key in <code>us-east-1</code>; you manage KSK lifecycle</td></tr>
+            <tr><td><strong>Zone signing key (ZSK)</strong></td><td>Managed by Route 53</td></tr>
+            <tr><td><strong>Key rollover</strong></td><td>Plan KSK rollover; Route 53 manages ZSK rotation</td></tr>
+            <tr><td><strong>Trust anchor</strong></td><td>DS record at registrar</td></tr>
+            <tr><td><strong>VPC resolver validation</strong></td><td>Enable Route 53 Resolver DNSSEC validation separately for VPCs that require validation; authoritative signing and recursive validation are different controls</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Benefits</h3>
+      <p>DNSSEC addresses core trust concerns in the DNS ecosystem by providing verifiable response authenticity.</p>
+      <div class="card-grid">
+        <div class="card">
+          <h3>Authenticity</h3>
+          <p>Verify response source.</p>
+        </div>
+        <div class="card">
+          <h3>Integrity</h3>
+          <p>Detect tampered responses.</p>
+        </div>
+        <div class="card">
+          <h3>Denial of existence</h3>
+          <p>Prove a record does not exist.</p>
+        </div>
+        <div class="card">
+          <h3>Compliance</h3>
+          <p>Meet security requirements.</p>
+        </div>
+      </div>
+
+      <div class="callout warning"><div><span class="callout-title">Warning</span><p>Do not enable DNSSEC signing without completing the parent-zone DS chain, and enable alarms for <code>DNSSECInternalFailure</code> and <code>DNSSECKeySigningKeysNeedingAction</code>.</p></div></div>
+    </section>
+
+    <section class="sec" id="application-recovery-controller">
+      <h2>Amazon Application Recovery Controller (ARC)</h2>
+      <p>ARC is a separate AWS service for recovering applications across Availability Zones and Regions. Routing controls integrate with a special Route 53 health check, but ARC also includes non-DNS recovery capabilities. Each component addresses a different failure scope, from single-AZ impairment to full regional failover.</p>
+
+      <h3>Components</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Component</th><th>Description</th><th>Use case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Region switch</strong></td><td>Orchestrate and monitor multi-Region recovery plans with plan evaluation and execution safety controls</td><td>Managed regional failover workflow</td></tr>
+            <tr><td><strong>Routing controls</strong></td><td>Highly available on/off switches (backed by a 5-endpoint redundant cluster) that gate traffic shifting</td><td>Deterministic, low-latency failover trigger</td></tr>
+            <tr><td><strong>Readiness checks (existing customers)</strong></td><td>Audit resource configuration/capacity/quota parity across replicas; this feature is no longer open to new customers</td><td>Existing recovery-group/cell designs</td></tr>
+            <tr><td><strong>Zonal shift / zonal autoshift</strong></td><td>Shift traffic away from an impaired AZ (via ELB/ASG) in minutes, with optional automatic shift</td><td>Fast AZ-level mitigation without a full DR failover</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>ARC best practices</h3>
+      <p>These practices ensure ARC-driven failover is tested, observable, and aligned with real DNS behavior.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Practice</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Use routing controls for operator-controlled regional failover</strong></td><td>Routing controls provide a highly available control plane and safety rules, but DNS caching and record TTLs still affect when clients observe DNS changes</td></tr>
+            <tr><td><strong>Evaluate recovery plans continuously</strong></td><td>For new designs, use Region switch plan evaluation; existing readiness-check customers can continue using readiness checks</td></tr>
+            <tr><td><strong>Test zonal shift regularly</strong></td><td>Validates AZ-level mitigation without waiting for a real incident</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout note"><div><span class="callout-title">Note</span><p>ARC readiness checks are no longer open to new customers. For new designs, use Region switch plan evaluation instead; existing readiness-check customers can continue using readiness checks.</p></div></div>
+    </section>
+
+    <section class="sec" id="traffic-flow">
+      <h2>Traffic Flow</h2>
+      <p>Traffic flow provides a visual, composable way to build complex routing logic from health checks and policies.</p>
+
+      <h3>Traffic flow features</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Visual editor</strong></td><td>Drag-and-drop traffic policies</td></tr>
+            <tr><td><strong>Calculators</strong></td><td>Combine health checks logically</td></tr>
+            <tr><td><strong>Policies</strong></td><td>Reusable traffic routing policies</td></tr>
+            <tr><td><strong>Split</strong></td><td>Weighted traffic distribution</td></tr>
+            <tr><td><strong>Failover</strong></td><td>Primary/secondary with health checks</td></tr>
+            <tr><td><strong>Latency</strong></td><td>Route by lowest latency</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Traffic policy example</h3>
+      <p>This example shows how individual traffic-flow components compose into a complete routing decision tree.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Component</th><th>Configuration</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Split</strong></td><td>90% primary, 10% canary</td></tr>
+            <tr><td><strong>Failover</strong></td><td>Primary health check, secondary fallback</td></tr>
+            <tr><td><strong>Latency</strong></td><td>Multiple regions, lowest latency wins</td></tr>
+            <tr><td><strong>Geolocation</strong></td><td>Continent/continent group routing</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="monitoring">
+      <h2>Monitoring</h2>
+
+      <h3>Key signals</h3>
+      <p>These are the metrics and logs that give you early warning of DNS-related health and routing issues.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Signal</th><th>Source</th><th>Alert/analysis</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>HealthCheckStatus</td><td>Route 53 health-check CloudWatch metrics</td><td>Alarm on an unexpected unhealthy state</td></tr>
+            <tr><td>HealthCheckPercentageHealthy / ChildHealthCheckHealthyCount</td><td>Route 53 calculated/endpoint health checks</td><td>Alarm on loss of checker or child-check quorum appropriate to the design</td></tr>
+            <tr><td>ConnectionTime / SSLHandshakeTime / TimeToFirstByte</td><td>Endpoint health-check metrics where applicable</td><td>Compare with endpoint SLO/baseline</td></tr>
+            <tr><td>Public DNS queries</td><td>Route 53 public query logging to CloudWatch Logs</td><td>Investigate names, types, response codes, and source networks</td></tr>
+            <tr><td>Resolver queries</td><td>Route 53 Resolver query logging</td><td>Security and hybrid-DNS troubleshooting</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Monitoring best practices</h3>
+      <p>Monitoring and testing practices keep your DNS configuration aligned with operational reality.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Practice</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Monitor health checks</strong></td><td>Alarm on state changes</td></tr>
+            <tr><td><strong>Track query volume</strong></td><td>Detect anomalies</td></tr>
+            <tr><td><strong>Failover testing</strong></td><td>Regular drills</td></tr>
+            <tr><td><strong>TTL management</strong></td><td>Balance propagation and freshness</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="cost-optimization">
+      <h2>Cost Optimization</h2>
+      <p>Route 53 costs scale with zone count, query volume, and health-check configuration; these strategies reduce unnecessary spend.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Strategy</th><th>Description</th><th>Potential savings</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Alias records</strong></td><td>Use aliases for eligible AWS resources</td><td>Route 53 does not charge for eligible alias queries</td></tr>
+            <tr><td><strong>Health check optimization</strong></td><td>Right-size check count and optional features</td><td>Lower recurring check cost</td></tr>
+            <tr><td><strong>TTL optimization</strong></td><td>Higher TTL = fewer queries</td><td>Reduced query volume</td></tr>
+            <tr><td><strong>Zone consolidation</strong></td><td>Fewer zones</td><td>Per-zone costs</td></tr>
+            <tr><td><strong>Remove unused records</strong></td><td>Clean up old records</td><td>Query cost reduction</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Pricing</h3>
+      <p>Route 53 pricing varies by hosted-zone count, query volume and routing policy, health-check type/options, Resolver endpoints and query logs, ARC features, and domain registration.</p>
+      <div class="callout note"><div><span class="callout-title">Note</span><p>Use the current AWS pricing page rather than embedding rates that can change or vary by tier.</p></div></div>
+    </section>
+
+    <section class="sec" id="cross-service-integration">
+      <h2>Cross-Service Integration</h2>
+      <p>Route 53 rarely operates in isolation; these integrations show which AWS services connect to DNS and why.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Service</th><th>Integration</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><a href="../Networking/CloudFront-Best-Practices.html">CloudFront</a></td><td>Alias to distribution</td><td>Global CDN</td></tr>
+            <tr><td><a href="../Networking/Load-Balancing-Best-Practices.html">ELB</a></td><td>Alias to load balancer</td><td>Load-balanced routing</td></tr>
+            <tr><td>S3</td><td>Alias to website endpoint</td><td>Static website hosting</td></tr>
+            <tr><td>VPC</td><td>Private hosted zones</td><td>Internal DNS</td></tr>
+            <tr><td>CloudWatch</td><td>Health check alarms</td><td>Monitoring</td></tr>
+            <tr><td><a href="../Security/Shield-Best-Practices.html">Shield</a></td><td>DDoS protection</td><td>DNS DDoS mitigation</td></tr>
+            <tr><td>ACM</td><td>SSL certificate validation</td><td>Domain ownership</td></tr>
+            <tr><td>Transfer Family</td><td>SFTP endpoint routing</td><td>File transfer</td></tr>
+            <tr><td>Amazon Application Recovery Controller</td><td>Region switch, routing controls, readiness checks for existing customers, and zonal shift</td><td>Multi-AZ/Region failover orchestration</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="additional-best-practices">
+      <h2>Additional Best Practices</h2>
+      <ul>
+        <li>Use alias A and AAAA records for supported dual-stack AWS targets and keep IPv4/IPv6 health and routing behavior consistent.</li>
+        <li>For failover records, understand the "all records unhealthy" behavior and avoid attaching a health check to an alias when <code>EvaluateTargetHealth</code> already represents the same target state.</li>
+        <li>Keep TTLs low enough for the recovery objective before a planned migration, then raise them when stability and cache efficiency matter. Existing cached answers remain until their TTL expires.</li>
+        <li>Protect hosted-zone and registrar changes with least privilege, MFA for human access, CloudTrail alerts, and registry/registrar lock where available.</li>
+        <li>Enable DNSSEC alarms for <code>DNSSECInternalFailure</code> and <code>DNSSECKeySigningKeysNeedingAction</code>; do not enable signing without completing the parent-zone DS chain.</li>
+        <li>Use Resolver endpoints and rules for hybrid DNS; do not forward private DNS through an internet NAT path.</li>
+      </ul>
+    </section>
+
+    <section class="sec" id="aws-references">
+      <h2>AWS References</h2>
+      <ul>
+        <li><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html">Route 53 routing policies</a></li>
+        <li><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html">Supported Route 53 record types</a></li>
+        <li><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-choosing-alias-non-alias.html">Choosing between alias and non-alias records</a></li>
+        <li><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/hosted-zones-private.html">Working with private hosted zones</a></li>
+        <li><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-configuring-dnssec.html">Configuring DNSSEC signing</a></li>
+        <li><a href="https://docs.aws.amazon.com/r53recovery/latest/dg/what-is-route53-recovery.html">What is Amazon Application Recovery Controller?</a></li>
+        <li><a href="https://docs.aws.amazon.com/r53recovery/latest/dg/arc-readiness-availability-change.html">ARC readiness-check availability change</a></li>
+      </ul>
+    </section>
+  </article>
+</main>
+
+<footer class="site-footer">
+  <nav class="pager" aria-label="Adjacent pages">
+    <a class="pager-card prev" href="../Networking/CloudFront-Best-Practices.html"><span class="pager-label">&larr; Previous</span><span class="pager-title">CloudFront Best Practices</span></a>
+    <a class="pager-card next" href="../Networking/Load-Balancing-Best-Practices.html"><span class="pager-label">Next &rarr;</span><span class="pager-title">Load Balancing Best Practices</span></a>
+  </nav>
+  <div class="topics">
+    <div class="topic-group">
+      <h4>Core Services</h4>
+        <a href="../Core-Services/EC2-Best-Practices.html">EC2</a>
+        <a href="../Core-Services/S3-Best-Practices.html">S3</a>
+        <a href="../Core-Services/IAM-Best-Practices.html">IAM</a>
+        <a href="../Core-Services/VPC-Best-Practices.html">VPC</a>
+    </div>
+    <div class="topic-group">
+      <h4>Database</h4>
+        <a href="../Database/RDS-Best-Practices.html">RDS</a>
+        <a href="../Database/DynamoDB-Best-Practices.html">DynamoDB</a>
+        <a href="../Database/ElastiCache-Best-Practices.html">ElastiCache</a>
+    </div>
+    <div class="topic-group">
+      <h4>Architecture Patterns</h4>
+        <a href="../Design/01-event-driven-patterns.html">Event-driven</a>
+        <a href="../Design/02-communication-patterns.html">Communication</a>
+        <a href="../Design/03-error-handling-patterns.html">Error handling</a>
+        <a href="../Design/04-cross-cutting-patterns.html">Cross-cutting</a>
+        <a href="../Design/05-database-integration-patterns.html">Database integration</a>
+        <a href="../Design/06-high-availability-dr-patterns.html">High availability &amp; DR</a>
+        <a href="../Design/07-caching-content-delivery-patterns.html">Caching &amp; delivery</a>
+        <a href="../Design/08-compute-deployment-patterns.html">Compute &amp; deployment</a>
+        <a href="../Design/09-multi-account-landing-zone-patterns.html">Multi-account</a>
+    </div>
+    <div class="topic-group">
+      <h4>Serverless</h4>
+        <a href="../Serverless/Lambda-Best-Practices.html">Lambda</a>
+        <a href="../Serverless/API-Gateway-Best-Practices.html">API Gateway</a>
+        <a href="../Serverless/EventBridge-Best-Practices.html">EventBridge</a>
+    </div>
+    <div class="topic-group">
+      <h4>Networking</h4>
+        <a href="../Networking/CloudFront-Best-Practices.html">CloudFront</a>
+        <a href="../Networking/Route53-Best-Practices.html" aria-current="page">Route 53</a>
+        <a href="../Networking/Load-Balancing-Best-Practices.html">Load balancing</a>
+    </div>
+    <div class="topic-group">
+      <h4>DevOps</h4>
+        <a href="../DevOps/CI-CD-Best-Practices.html">CI/CD</a>
+        <a href="../DevOps/CloudFormation-Best-Practices.html">CloudFormation</a>
+        <a href="../DevOps/ECS-EKS-Best-Practices.html">ECS/EKS</a>
+    </div>
+    <div class="topic-group">
+      <h4>Monitoring</h4>
+        <a href="../Monitoring/CloudWatch-Best-Practices.html">CloudWatch</a>
+        <a href="../Monitoring/X-Ray-Best-Practices.html">X-Ray</a>
+    </div>
+    <div class="topic-group">
+      <h4>Security</h4>
+        <a href="../Security/WAF-Best-Practices.html">WAF</a>
+        <a href="../Security/KMS-Best-Practices.html">KMS</a>
+        <a href="../Security/Shield-Best-Practices.html">Shield</a>
+    </div>
+    <div class="topic-group">
+      <h4>Cost Optimization</h4>
+        <a href="../Cost-Optimization/Cost-Optimization.html">Guide</a>
+    </div>
+  </div>
+  <p class="foot-note">Community-maintained guidance. Verify service details against current AWS documentation before production use.</p>
+</footer>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CloudWatch Best Practices — AWS Best Practices</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("aws-docs-theme-v2") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");</script>
+  <link rel="stylesheet" href="../assets/css/site.css">
+</head>
+<body>
+<div id="scroll-progress"></div>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><span class="brand-dot"></span>AWS Best Practices</a>
+    <nav class="header-actions" aria-label="Site actions">
+      <a class="gh-link" href="https://github.com/AlexanderBesss/AWS_best_praactices" target="_blank" rel="noopener">GitHub</a>
+      <button class="theme-btn" type="button" aria-label="Toggle color theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+  <article class="doc">
+
+    <section class="hero">
+      <h1>CloudWatch Best <span class="accent">Practices</span></h1>
+      <p class="lede">Observability is the foundation of reliable cloud operations: without it, incidents go undetected until users are impacted, recovery times balloon, and root-cause analysis becomes guesswork. CloudWatch provides the metrics, logs, alarms, and signals needed to detect, diagnose, and resolve issues before they affect business outcomes.</p>
+      <div class="chips">
+        <a class="chip" href="#metrics">Metrics</a>
+        <a class="chip" href="#alarms">Alarms</a>
+        <a class="chip" href="#dashboards">Dashboards</a>
+        <a class="chip" href="#logs">Logs</a>
+        <a class="chip" href="#canaries">Synthetic Canaries</a>
+        <a class="chip" href="#anomaly-detection">Anomaly Detection</a>
+        <a class="chip" href="#multi-account-observability">Multi-Account</a>
+        <a class="chip" href="#cost-optimization">Cost Optimization</a>
+      </div>
+    </section>
+
+    <nav class="toc">
+      <p class="toc-title">On this page</p>
+      <ul>
+        <li><a href="#metrics">Metrics</a></li>
+        <li><a href="#alarms">Alarms</a></li>
+        <li><a href="#dashboards">Dashboards</a></li>
+        <li><a href="#logs">Logs</a></li>
+        <li><a href="#canaries">Synthetic Canaries</a></li>
+        <li><a href="#anomaly-detection">Log Anomaly Detection</a></li>
+        <li><a href="#multi-account-observability">Application-Centric and Multi-Account Observability</a></li>
+        <li><a href="#cost-optimization">Cost Optimization</a></li>
+        <li><a href="#cross-service-integration">Cross-Service Integration</a></li>
+      </ul>
+    </nav>
+
+    <section class="sec" id="metrics">
+      <h2>Metrics</h2>
+      <p>Choosing the right metric type balances cost, resolution, and the specificity needed to diagnose issues. Knowing which signals matter per service prevents both monitoring gaps and alert noise.</p>
+
+      <h3>Standard vs custom metrics</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Type</th><th>Source</th><th>Cost</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>AWS service metrics</strong></td><td>AWS services</td><td>Many basic metrics have no additional CloudWatch metric charge; optional detailed/request metrics can be billed</td><td>Resource monitoring</td></tr>
+            <tr><td><strong>Custom</strong></td><td>Application, agent, EMF, or OpenTelemetry</td><td>Per custom metric and API/log ingestion as applicable</td><td>Application-specific telemetry</td></tr>
+            <tr><td><strong>High-resolution custom</strong></td><td>1-second storage resolution</td><td>Custom metric charges; 10/30-second alarms cost more than standard alarms</td><td>Sub-minute analysis</td></tr>
+            <tr><td><strong>Standard-resolution custom</strong></td><td>1-minute storage resolution</td><td>Custom metric charges</td><td>Most application metrics</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Metric resolution and retention</h3>
+      <p>CloudWatch retains all metric data, but the queryable <em>resolution</em> degrades over time as data ages — it is aggregated to coarser periods, not deleted.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Data point period</th><th>Available at that resolution for</th><th>Cost</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>&lt; 60 seconds (high-resolution)</td><td>3 hours</td><td>Custom metric/API charges apply</td></tr>
+            <tr><td>60 seconds (1 minute)</td><td>15 days</td><td>Depends on the metric source</td></tr>
+            <tr><td>300 seconds (5 minutes)</td><td>63 days</td><td>Depends on the metric source</td></tr>
+            <tr><td>3600 seconds (1 hour)</td><td>455 days (15 months)</td><td>Depends on the metric source</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout note"><div><span class="callout-title">Note</span><p>After each window, data is automatically aggregated to the next coarser period rather than discarded. Total retention is 15 months, but only at 1-hour resolution — plan dashboards and investigations accordingly.</p></div></div>
+
+      <h3>Key metrics by service</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Service</th><th>Useful signals</th><th>Alarm design</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>EC2</td><td>CPUUtilization, StatusCheckFailed, network/EBS metrics, memory/disk from the agent</td><td>Capacity boundary, failed status check, or workload SLO</td></tr>
+            <tr><td>RDS</td><td>CPUUtilization, FreeableMemory, storage, connections, ReplicaLag</td><td>Engine-specific capacity limits and replication/recovery objectives</td></tr>
+            <tr><td>ALB</td><td>RequestCount, HTTPCode_ELB_5XX_Count, HTTPCode_Target_5XX_Count, TargetResponseTime</td><td>Availability/latency SLO and error-budget burn</td></tr>
+            <tr><td>S3</td><td>4xxErrors, 5xxErrors, FirstByteLatency (opt-in request metrics); BucketSizeBytes (daily storage metric)</td><td>Application SLO; distinguish expected 4xx responses</td></tr>
+            <tr><td>Lambda</td><td>Errors, Duration, Throttles, ConcurrentExecutions, IteratorAge where applicable</td><td>Error rate, timeout headroom, throttling, and event-age SLO</td></tr>
+            <tr><td>DynamoDB</td><td>ConsumedReadCapacityUnits, ConsumedWriteCapacityUnits, ReadThrottleEvents, WriteThrottleEvents</td><td>Sustained throttling, capacity risk, or user-visible failure</td></tr>
+            <tr><td>ElastiCache</td><td>CacheHits/CacheMisses, CurrConnections, engine CPU/memory/evictions</td><td>Workload-specific hit-rate and resource-pressure thresholds</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Observability flow at a glance</h3>
+      <figure class="diagram wide">
+        <span class="code-lang">diagram</span>
+        <div class="mermaid" data-mode="light"><svg id="r_default_20_0" width="1365.15625" height="305" xmlns="http://www.w3.org/2000/svg" class="flowchart" viewBox="0 0 1365.15625 305" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#r_default_20_0{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#333;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#r_default_20_0 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#r_default_20_0 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#r_default_20_0 .error-icon{fill:#552222;}#r_default_20_0 .error-text{fill:#552222;stroke:#552222;}#r_default_20_0 .edge-thickness-normal{stroke-width:1px;}#r_default_20_0 .edge-thickness-thick{stroke-width:3.5px;}#r_default_20_0 .edge-pattern-solid{stroke-dasharray:0;}#r_default_20_0 .edge-thickness-invisible{stroke-width:0;fill:none;}#r_default_20_0 .edge-pattern-dashed{stroke-dasharray:3;}#r_default_20_0 .edge-pattern-dotted{stroke-dasharray:2;}#r_default_20_0 .marker{fill:#333333;stroke:#333333;}#r_default_20_0 .marker.cross{stroke:#333333;}#r_default_20_0 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#r_default_20_0 p{margin:0;}#r_default_20_0 .label{font-family:"trebuchet ms",verdana,arial,sans-serif;color:#333;}#r_default_20_0 .cluster-label text{fill:#333;}#r_default_20_0 .cluster-label span{color:#333;}#r_default_20_0 .cluster-label span p{background-color:transparent;}#r_default_20_0 .label text,#r_default_20_0 span{fill:#333;color:#333;}#r_default_20_0 .node rect,#r_default_20_0 .node circle,#r_default_20_0 .node ellipse,#r_default_20_0 .node polygon,#r_default_20_0 .node path{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}#r_default_20_0 .rough-node .label text,#r_default_20_0 .node .label text,#r_default_20_0 .image-shape .label,#r_default_20_0 .icon-shape .label{text-anchor:middle;}#r_default_20_0 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#r_default_20_0 .rough-node .label,#r_default_20_0 .node .label,#r_default_20_0 .image-shape .label,#r_default_20_0 .icon-shape .label{text-align:center;}#r_default_20_0 .node.clickable{cursor:pointer;}#r_default_20_0 .root .anchor path{fill:#333333!important;stroke-width:0;stroke:#333333;}#r_default_20_0 .arrowheadPath{fill:#333333;}#r_default_20_0 .edgePaths .path{stroke:#333333;stroke-width:1px;}#r_default_20_0 .flowchart-link{stroke:#333333;fill:none;}#r_default_20_0 .edgeLabel{background-color:rgba(232,232,232, 0.8);text-align:center;}#r_default_20_0 .edgeLabel p{background-color:rgba(232,232,232, 0.8);}#r_default_20_0 .edgeLabel rect{opacity:0.5;background-color:rgba(232,232,232, 0.8);fill:rgba(232,232,232, 0.8);}#r_default_20_0 .labelBkg{background-color:rgba(232, 232, 232, 0.5);}#r_default_20_0 .cluster rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}#r_default_20_0 .cluster text{fill:#333;}#r_default_20_0 .cluster span{color:#333;}#r_default_20_0 .node .collapsed-indicator{fill:#aaaa33;stroke:none;opacity:0.6;}#r_default_20_0 .node .collapsed-separator{stroke:#aaaa33;stroke-width:0.75px;}#r_default_20_0 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:12px;background:hsl(80, 100%, 96.2745098039%);border:1px solid #aaaa33;border-radius:2px;pointer-events:none;z-index:100;}#r_default_20_0 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#333;}#r_default_20_0 rect.text{fill:none;stroke-width:0;}#r_default_20_0 .icon-shape,#r_default_20_0 .image-shape{background-color:rgba(232,232,232, 0.8);text-align:center;}#r_default_20_0 .icon-shape p,#r_default_20_0 .image-shape p{background-color:rgba(232,232,232, 0.8);padding:2px;}#r_default_20_0 .icon-shape .label rect,#r_default_20_0 .image-shape .label rect{opacity:0.5;background-color:rgba(232,232,232, 0.8);fill:rgba(232,232,232, 0.8);}#r_default_20_0 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#r_default_20_0 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#r_default_20_0 .node .neo-node{stroke:#9370DB;}#r_default_20_0 [data-look="neo"].node rect,#r_default_20_0 [data-look="neo"].cluster rect,#r_default_20_0 [data-look="neo"].node polygon{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_20_0 [data-look="neo"].swimlane.cluster rect{filter:none;}#r_default_20_0 [data-look="neo"].node path{stroke:#9370DB;stroke-width:1px;}#r_default_20_0 [data-look="neo"].node .outer-path{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_20_0 [data-look="neo"].node .neo-line path{stroke:#9370DB;filter:none;}#r_default_20_0 [data-look="neo"].node circle{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_20_0 [data-look="neo"].node circle .state-start{fill:#000000;}#r_default_20_0 [data-look="neo"].icon-shape .icon{fill:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_20_0 [data-look="neo"].icon-shape .icon-neo path{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#r_default_20_0 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="r_default_20_0_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_20_0_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_20_0_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_20_0_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></polygon></marker><marker id="r_default_20_0_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_20_0_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_20_0_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_20_0_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_default_20_0_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_20_0_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_default_20_0_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"></path></marker><marker id="r_default_20_0_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"></path></marker><g class="root"><g class="clusters"></g><g class="edgePaths"><path d="M244.824,48L252.854,44.167C260.883,40.333,276.941,32.667,293.38,29.376C309.818,26.085,326.636,27.17,335.045,27.713L343.454,28.255" id="r_default_20_0-L_A_B_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_A_B_0" data-points="W3sieCI6MjQ0LjgyNDMyNDMyNDMyNDMyLCJ5Ijo0OH0seyJ4IjoyOTMsInkiOjI1fSx7IngiOjM0Ny40NDUzMTI1LCJ5IjoyOC41MTI2MDA4MDY0NTE2MTJ9XQ==" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M244.824,150L252.854,153.833C260.883,157.667,276.941,165.333,288.471,169.167C300,173,307,173,310.5,173L314,173" id="r_default_20_0-L_A_I_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_A_I_0" data-points="W3sieCI6MjQ0LjgyNDMyNDMyNDMyNDMyLCJ5IjoxNTB9LHsieCI6MjkzLCJ5IjoxNzN9LHsieCI6MzE4LCJ5IjoxNzN9XQ==" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M548.555,35L557.629,35C566.703,35,584.852,35,597.426,35C610,35,617,35,620.5,35L624,35" id="r_default_20_0-L_B_C_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_B_C_0" data-points="W3sieCI6NTQ4LjU1NDY4NzUsInkiOjM1fSx7IngiOjYwMywieSI6MzV9LHsieCI6NjI4LCJ5IjozNX1d" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M825.172,35L829.339,35C833.505,35,841.839,35,849.507,35.275C857.176,35.549,864.18,36.099,867.682,36.374L871.184,36.648" id="r_default_20_0-L_C_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_D_0" data-points="W3sieCI6ODI1LjE3MTg3NSwieSI6MzV9LHsieCI6ODUwLjE3MTg3NSwieSI6MzV9LHsieCI6ODc1LjE3MTg3NSwieSI6MzYuOTYxMDAyNzg1NTE1MzJ9XQ==" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M745.021,62L762.546,87.667C780.072,113.333,815.122,164.667,843.711,194.594C872.3,224.521,894.428,233.042,905.492,237.302L916.556,241.563" id="r_default_20_0-L_C_E_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_E_0" data-points="W3sieCI6NzQ1LjAyMTQwODgzOTc3OSwieSI6NjJ9LHsieCI6ODUwLjE3MTg3NSwieSI6MjE2fSx7IngiOjkyMC4yODkwNjI1LCJ5IjoyNDN9XQ==" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M170.695,200L191.079,183.167C211.464,166.333,252.232,132.667,286.935,109.921C321.637,87.176,350.275,75.351,364.593,69.439L378.912,63.527" id="r_default_20_0-L_F_B_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_F_B_0" data-points="W3sieCI6MTcwLjY5NTMxMjUsInkiOjIwMH0seyJ4IjoyOTMsInkiOjk5fSx7IngiOjM4Mi42MDkzNzUsInkiOjYyfV0=" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M216.962,254L229.635,258.333C242.308,262.667,267.654,271.333,306.16,275.667C344.667,280,396.333,280,448,280C499.667,280,551.333,280,597.764,280C644.195,280,685.391,280,726.586,280C767.781,280,808.977,280,837.145,279.46C865.313,278.92,880.455,277.841,888.025,277.301L895.596,276.761" id="r_default_20_0-L_F_E_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_F_E_0" data-points="W3sieCI6MjE2Ljk2MjI2NDE1MDk0MzM4LCJ5IjoyNTR9LHsieCI6MjkzLCJ5IjoyODB9LHsieCI6NDQ4LCJ5IjoyODB9LHsieCI6NjAzLCJ5IjoyODB9LHsieCI6NzI2LjU4NTkzNzUsInkiOjI4MH0seyJ4Ijo4NTAuMTcxODc1LCJ5IjoyODB9LHsieCI6ODk5LjU4NTkzNzUsInkiOjI3Ni40NzYzMjMxMTk3NzcxM31d" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M1105.641,46L1109.807,46C1113.974,46,1122.307,46,1142.109,60.546C1161.91,75.092,1193.179,104.184,1208.814,118.729L1224.449,133.275" id="r_default_20_0-L_D_G_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_D_G_0" data-points="W3sieCI6MTEwNS42NDA2MjUsInkiOjQ2fSx7IngiOjExMzAuNjQwNjI1LCJ5Ijo0Nn0seyJ4IjoxMjI3LjM3NzQwMzg0NjE1MzgsInkiOjEzNn1d" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M1081.227,270L1089.462,270C1097.698,270,1114.169,270,1137.568,257.099C1160.967,244.197,1191.293,218.395,1206.456,205.493L1221.619,192.592" id="r_default_20_0-L_E_G_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_E_G_0" data-points="W3sieCI6MTA4MS4yMjY1NjI1LCJ5IjoyNzB9LHsieCI6MTEzMC42NDA2MjUsInkiOjI3MH0seyJ4IjoxMjI0LjY2NTE1NzcxMDI4MDUsInkiOjE5MH1d" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M578,173L582.167,173C586.333,173,594.667,173,606.277,173C617.888,173,632.776,173,640.22,173L647.664,173" id="r_default_20_0-L_I_H_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_I_H_0" data-points="W3sieCI6NTc4LCJ5IjoxNzN9LHsieCI6NjAzLCJ5IjoxNzN9LHsieCI6NjUxLjY2NDA2MjUsInkiOjE3M31d" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path><path d="M801.508,173L809.618,173C817.729,173,833.951,173,859.971,156.781C885.991,140.562,921.809,108.123,939.718,91.904L957.628,75.685" id="r_default_20_0-L_H_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_H_D_0" data-points="W3sieCI6ODAxLjUwNzgxMjUsInkiOjE3M30seyJ4Ijo4NTAuMTcxODc1LCJ5IjoxNzN9LHsieCI6OTYwLjU5MjY0MjcxNjUzNTUsInkiOjczfV0=" data-look="classic" marker-end="url(#r_default_20_0_flowchart-v2-pointEnd)"></path></g><g class="edgeLabels"><g class="edgeLabel"><g class="label" data-id="L_A_B_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_A_I_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_B_C_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_D_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_E_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_F_B_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_F_E_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_D_G_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_E_G_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_I_H_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_H_D_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default" id="r_default_20_0-flowchart-A-0" data-look="classic" transform="translate(138, 99)"><rect class="basic label-container" style="" x="-130" y="-51" width="260" height="102"></rect><g class="label" style="" transform="translate(-100, -36)"><rect></rect><foreignObject width="200" height="72"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="nodeLabel"><p>EC2 / RDS / ALB / Lambda / S3<br>(metrics sources)</p></span></div></foreignObject></g></g><g class="node default" id="r_default_20_0-flowchart-B-1" data-look="classic" transform="translate(448, 35)"><rect class="basic label-container" style="" x="-100.5546875" y="-27" width="201.109375" height="54"></rect><g class="label" style="" transform="translate(-70.5546875, -12)"><rect></rect><foreignObject width="141.109375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>CloudWatch Metrics</p></span></div></foreignObject></g></g><g class="node default" id="r_default_20_0-flowchart-I-3" data-look="classic" transform="translate(448, 173)"><rect class="basic label-container" style="" x="-130" y="-51" width="260" height="102"></rect><g class="label" style="" transform="translate(-100, -36)"><rect></rect><foreignObject width="200" height="72"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="nodeLabel"><p>CloudWatch Logs<br>(application, service, and agent logs)</p></span></div></foreignObject></g></g><g class="node default" id="r_default_20_0-flowchart-C-5" data-look="classic" transform="translate(726.5859375, 35)"><rect class="basic label-container" style="" x="-98.5859375" y="-27" width="197.171875" height="54"></rect><g class="label" style="" transform="translate(-68.5859375, -12)"><rect></rect><foreignObject width="137.171875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>CloudWatch Alarms</p></span></div></foreignObject></g></g><g class="node default" id="r_default_20_0-flowchart-D-7" data-look="classic" transform="translate(990.40625, 46)"><rect class="basic label-container" style="" x="-115.234375" y="-27" width="230.46875" height="54"></rect><g class="label" style="" transform="translate(-85.234375, -12)"><rect></rect><foreignObject width="170.46875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>CloudWatch Dashboards</p></span></div></foreignObject></g></g><g class="node default" id="r_default_20_0-flowchart-E-9" data-look="classic" transform="translate(990.40625, 270)"><rect class="basic label-container" style="" x="-90.8203125" y="-27" width="181.640625" height="54"></rect><g class="label" style="" transform="translate(-60.8203125, -12)"><rect></rect><foreignObject width="121.640625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>SNS Notifications</p></span></div></foreignObject></g></g><g class="node default" id="r_default_20_0-flowchart-F-10" data-look="classic" transform="translate(138, 227)"><rect class="basic label-container" style="" x="-96.453125" y="-27" width="192.90625" height="54"></rect><g class="label" style="" transform="translate(-66.453125, -12)"><rect></rect><foreignObject width="132.90625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Synthetic Canaries</p></span></div></foreignObject></g></g><g class="node default" id="r_default_20_0-flowchart-G-15" data-look="classic" transform="translate(1256.3984375, 163)"><rect class="basic label-container" style="" x="-100.7578125" y="-27" width="201.515625" height="54"></rect><g class="label" style="" transform="translate(-70.7578125, -12)"><rect></rect><foreignObject width="141.515625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Operators / On-Call</p></span></div></foreignObject></g></g><g class="node default" id="r_default_20_0-flowchart-H-19" data-look="classic" transform="translate(726.5859375, 173)"><rect class="basic label-container" style="" x="-74.921875" y="-27" width="149.84375" height="54"></rect><g class="label" style="" transform="translate(-44.921875, -12)"><rect></rect><foreignObject width="89.84375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Logs Insights</p></span></div></foreignObject></g></g></g></g></g><defs><filter id="r_default_20_0-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs><defs><filter id="r_default_20_0-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs></svg></div>
+        <div class="mermaid" data-mode="dark"><svg id="r_dark_20_0" width="1365.15625" height="305" xmlns="http://www.w3.org/2000/svg" class="flowchart" viewBox="0 0 1365.15625 305" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#r_dark_20_0{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#ccc;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#r_dark_20_0 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#r_dark_20_0 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#r_dark_20_0 .error-icon{fill:#a44141;}#r_dark_20_0 .error-text{fill:#ddd;stroke:#ddd;}#r_dark_20_0 .edge-thickness-normal{stroke-width:1px;}#r_dark_20_0 .edge-thickness-thick{stroke-width:3.5px;}#r_dark_20_0 .edge-pattern-solid{stroke-dasharray:0;}#r_dark_20_0 .edge-thickness-invisible{stroke-width:0;fill:none;}#r_dark_20_0 .edge-pattern-dashed{stroke-dasharray:3;}#r_dark_20_0 .edge-pattern-dotted{stroke-dasharray:2;}#r_dark_20_0 .marker{fill:lightgrey;stroke:lightgrey;}#r_dark_20_0 .marker.cross{stroke:lightgrey;}#r_dark_20_0 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#r_dark_20_0 p{margin:0;}#r_dark_20_0 .label{font-family:"trebuchet ms",verdana,arial,sans-serif;color:#ccc;}#r_dark_20_0 .cluster-label text{fill:#F9FFFE;}#r_dark_20_0 .cluster-label span{color:#F9FFFE;}#r_dark_20_0 .cluster-label span p{background-color:transparent;}#r_dark_20_0 .label text,#r_dark_20_0 span{fill:#ccc;color:#ccc;}#r_dark_20_0 .node rect,#r_dark_20_0 .node circle,#r_dark_20_0 .node ellipse,#r_dark_20_0 .node polygon,#r_dark_20_0 .node path{fill:#1f2020;stroke:#ccc;stroke-width:1px;}#r_dark_20_0 .rough-node .label text,#r_dark_20_0 .node .label text,#r_dark_20_0 .image-shape .label,#r_dark_20_0 .icon-shape .label{text-anchor:middle;}#r_dark_20_0 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#r_dark_20_0 .rough-node .label,#r_dark_20_0 .node .label,#r_dark_20_0 .image-shape .label,#r_dark_20_0 .icon-shape .label{text-align:center;}#r_dark_20_0 .node.clickable{cursor:pointer;}#r_dark_20_0 .root .anchor path{fill:lightgrey!important;stroke-width:0;stroke:lightgrey;}#r_dark_20_0 .arrowheadPath{fill:lightgrey;}#r_dark_20_0 .edgePaths .path{stroke:lightgrey;stroke-width:1px;}#r_dark_20_0 .flowchart-link{stroke:lightgrey;fill:none;}#r_dark_20_0 .edgeLabel{background-color:hsl(0, 0%, 34.4117647059%);text-align:center;}#r_dark_20_0 .edgeLabel p{background-color:hsl(0, 0%, 34.4117647059%);}#r_dark_20_0 .edgeLabel rect{opacity:0.5;background-color:hsl(0, 0%, 34.4117647059%);fill:hsl(0, 0%, 34.4117647059%);}#r_dark_20_0 .labelBkg{background-color:rgba(87.75, 87.75, 87.75, 0.5);}#r_dark_20_0 .cluster rect{fill:hsl(180, 1.5873015873%, 28.3529411765%);stroke:rgba(255, 255, 255, 0.25);stroke-width:1px;}#r_dark_20_0 .cluster text{fill:#F9FFFE;}#r_dark_20_0 .cluster span{color:#F9FFFE;}#r_dark_20_0 .node .collapsed-indicator{fill:rgba(255, 255, 255, 0.25);stroke:none;opacity:0.6;}#r_dark_20_0 .node .collapsed-separator{stroke:rgba(255, 255, 255, 0.25);stroke-width:0.75px;}#r_dark_20_0 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:12px;background:hsl(20, 1.5873015873%, 12.3529411765%);border:1px solid rgba(255, 255, 255, 0.25);border-radius:2px;pointer-events:none;z-index:100;}#r_dark_20_0 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#ccc;}#r_dark_20_0 rect.text{fill:none;stroke-width:0;}#r_dark_20_0 .icon-shape,#r_dark_20_0 .image-shape{background-color:hsl(0, 0%, 34.4117647059%);text-align:center;}#r_dark_20_0 .icon-shape p,#r_dark_20_0 .image-shape p{background-color:hsl(0, 0%, 34.4117647059%);padding:2px;}#r_dark_20_0 .icon-shape .label rect,#r_dark_20_0 .image-shape .label rect{opacity:0.5;background-color:hsl(0, 0%, 34.4117647059%);fill:hsl(0, 0%, 34.4117647059%);}#r_dark_20_0 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#r_dark_20_0 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#r_dark_20_0 .node .neo-node{stroke:#ccc;}#r_dark_20_0 [data-look="neo"].node rect,#r_dark_20_0 [data-look="neo"].cluster rect,#r_dark_20_0 [data-look="neo"].node polygon{stroke:url(#r_dark_20_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_20_0 [data-look="neo"].swimlane.cluster rect{filter:none;}#r_dark_20_0 [data-look="neo"].node path{stroke:url(#r_dark_20_0-gradient);stroke-width:1px;}#r_dark_20_0 [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_20_0 [data-look="neo"].node .neo-line path{stroke:#ccc;filter:none;}#r_dark_20_0 [data-look="neo"].node circle{stroke:url(#r_dark_20_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_20_0 [data-look="neo"].node circle .state-start{fill:#000000;}#r_dark_20_0 [data-look="neo"].icon-shape .icon{fill:url(#r_dark_20_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_20_0 [data-look="neo"].icon-shape .icon-neo path{stroke:url(#r_dark_20_0-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#r_dark_20_0 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="r_dark_20_0_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_20_0_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_20_0_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_20_0_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></polygon></marker><marker id="r_dark_20_0_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_20_0_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_20_0_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_20_0_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"></circle></marker><marker id="r_dark_20_0_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_20_0_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="r_dark_20_0_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"></path></marker><marker id="r_dark_20_0_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"></path></marker><g class="root"><g class="clusters"></g><g class="edgePaths"><path d="M244.824,48L252.854,44.167C260.883,40.333,276.941,32.667,293.38,29.376C309.818,26.085,326.636,27.17,335.045,27.713L343.454,28.255" id="r_dark_20_0-L_A_B_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_A_B_0" data-points="W3sieCI6MjQ0LjgyNDMyNDMyNDMyNDMyLCJ5Ijo0OH0seyJ4IjoyOTMsInkiOjI1fSx7IngiOjM0Ny40NDUzMTI1LCJ5IjoyOC41MTI2MDA4MDY0NTE2MTJ9XQ==" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M244.824,150L252.854,153.833C260.883,157.667,276.941,165.333,288.471,169.167C300,173,307,173,310.5,173L314,173" id="r_dark_20_0-L_A_I_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_A_I_0" data-points="W3sieCI6MjQ0LjgyNDMyNDMyNDMyNDMyLCJ5IjoxNTB9LHsieCI6MjkzLCJ5IjoxNzN9LHsieCI6MzE4LCJ5IjoxNzN9XQ==" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M548.555,35L557.629,35C566.703,35,584.852,35,597.426,35C610,35,617,35,620.5,35L624,35" id="r_dark_20_0-L_B_C_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_B_C_0" data-points="W3sieCI6NTQ4LjU1NDY4NzUsInkiOjM1fSx7IngiOjYwMywieSI6MzV9LHsieCI6NjI4LCJ5IjozNX1d" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M825.172,35L829.339,35C833.505,35,841.839,35,849.507,35.275C857.176,35.549,864.18,36.099,867.682,36.374L871.184,36.648" id="r_dark_20_0-L_C_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_D_0" data-points="W3sieCI6ODI1LjE3MTg3NSwieSI6MzV9LHsieCI6ODUwLjE3MTg3NSwieSI6MzV9LHsieCI6ODc1LjE3MTg3NSwieSI6MzYuOTYxMDAyNzg1NTE1MzJ9XQ==" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M745.021,62L762.546,87.667C780.072,113.333,815.122,164.667,843.711,194.594C872.3,224.521,894.428,233.042,905.492,237.302L916.556,241.563" id="r_dark_20_0-L_C_E_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_E_0" data-points="W3sieCI6NzQ1LjAyMTQwODgzOTc3OSwieSI6NjJ9LHsieCI6ODUwLjE3MTg3NSwieSI6MjE2fSx7IngiOjkyMC4yODkwNjI1LCJ5IjoyNDN9XQ==" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M170.695,200L191.079,183.167C211.464,166.333,252.232,132.667,286.935,109.921C321.637,87.176,350.275,75.351,364.593,69.439L378.912,63.527" id="r_dark_20_0-L_F_B_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_F_B_0" data-points="W3sieCI6MTcwLjY5NTMxMjUsInkiOjIwMH0seyJ4IjoyOTMsInkiOjk5fSx7IngiOjM4Mi42MDkzNzUsInkiOjYyfV0=" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M216.962,254L229.635,258.333C242.308,262.667,267.654,271.333,306.16,275.667C344.667,280,396.333,280,448,280C499.667,280,551.333,280,597.764,280C644.195,280,685.391,280,726.586,280C767.781,280,808.977,280,837.145,279.46C865.313,278.92,880.455,277.841,888.025,277.301L895.596,276.761" id="r_dark_20_0-L_F_E_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_F_E_0" data-points="W3sieCI6MjE2Ljk2MjI2NDE1MDk0MzM4LCJ5IjoyNTR9LHsieCI6MjkzLCJ5IjoyODB9LHsieCI6NDQ4LCJ5IjoyODB9LHsieCI6NjAzLCJ5IjoyODB9LHsieCI6NzI2LjU4NTkzNzUsInkiOjI4MH0seyJ4Ijo4NTAuMTcxODc1LCJ5IjoyODB9LHsieCI6ODk5LjU4NTkzNzUsInkiOjI3Ni40NzYzMjMxMTk3NzcxM31d" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M1105.641,46L1109.807,46C1113.974,46,1122.307,46,1142.109,60.546C1161.91,75.092,1193.179,104.184,1208.814,118.729L1224.449,133.275" id="r_dark_20_0-L_D_G_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_D_G_0" data-points="W3sieCI6MTEwNS42NDA2MjUsInkiOjQ2fSx7IngiOjExMzAuNjQwNjI1LCJ5Ijo0Nn0seyJ4IjoxMjI3LjM3NzQwMzg0NjE1MzgsInkiOjEzNn1d" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M1081.227,270L1089.462,270C1097.698,270,1114.169,270,1137.568,257.099C1160.967,244.197,1191.293,218.395,1206.456,205.493L1221.619,192.592" id="r_dark_20_0-L_E_G_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_E_G_0" data-points="W3sieCI6MTA4MS4yMjY1NjI1LCJ5IjoyNzB9LHsieCI6MTEzMC42NDA2MjUsInkiOjI3MH0seyJ4IjoxMjI0LjY2NTE1NzcxMDI4MDUsInkiOjE5MH1d" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M578,173L582.167,173C586.333,173,594.667,173,606.277,173C617.888,173,632.776,173,640.22,173L647.664,173" id="r_dark_20_0-L_I_H_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_I_H_0" data-points="W3sieCI6NTc4LCJ5IjoxNzN9LHsieCI6NjAzLCJ5IjoxNzN9LHsieCI6NjUxLjY2NDA2MjUsInkiOjE3M31d" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path><path d="M801.508,173L809.618,173C817.729,173,833.951,173,859.971,156.781C885.991,140.562,921.809,108.123,939.718,91.904L957.628,75.685" id="r_dark_20_0-L_H_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_H_D_0" data-points="W3sieCI6ODAxLjUwNzgxMjUsInkiOjE3M30seyJ4Ijo4NTAuMTcxODc1LCJ5IjoxNzN9LHsieCI6OTYwLjU5MjY0MjcxNjUzNTUsInkiOjczfV0=" data-look="classic" marker-end="url(#r_dark_20_0_flowchart-v2-pointEnd)"></path></g><g class="edgeLabels"><g class="edgeLabel"><g class="label" data-id="L_A_B_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_A_I_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_B_C_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_D_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_E_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_F_B_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_F_E_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_D_G_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_E_G_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_I_H_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_H_D_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default" id="r_dark_20_0-flowchart-A-0" data-look="classic" transform="translate(138, 99)"><rect class="basic label-container" style="" x="-130" y="-51" width="260" height="102"></rect><g class="label" style="" transform="translate(-100, -36)"><rect></rect><foreignObject width="200" height="72"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="nodeLabel"><p>EC2 / RDS / ALB / Lambda / S3<br>(metrics sources)</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_20_0-flowchart-B-1" data-look="classic" transform="translate(448, 35)"><rect class="basic label-container" style="" x="-100.5546875" y="-27" width="201.109375" height="54"></rect><g class="label" style="" transform="translate(-70.5546875, -12)"><rect></rect><foreignObject width="141.109375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>CloudWatch Metrics</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_20_0-flowchart-I-3" data-look="classic" transform="translate(448, 173)"><rect class="basic label-container" style="" x="-130" y="-51" width="260" height="102"></rect><g class="label" style="" transform="translate(-100, -36)"><rect></rect><foreignObject width="200" height="72"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="nodeLabel"><p>CloudWatch Logs<br>(application, service, and agent logs)</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_20_0-flowchart-C-5" data-look="classic" transform="translate(726.5859375, 35)"><rect class="basic label-container" style="" x="-98.5859375" y="-27" width="197.171875" height="54"></rect><g class="label" style="" transform="translate(-68.5859375, -12)"><rect></rect><foreignObject width="137.171875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>CloudWatch Alarms</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_20_0-flowchart-D-7" data-look="classic" transform="translate(990.40625, 46)"><rect class="basic label-container" style="" x="-115.234375" y="-27" width="230.46875" height="54"></rect><g class="label" style="" transform="translate(-85.234375, -12)"><rect></rect><foreignObject width="170.46875" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>CloudWatch Dashboards</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_20_0-flowchart-E-9" data-look="classic" transform="translate(990.40625, 270)"><rect class="basic label-container" style="" x="-90.8203125" y="-27" width="181.640625" height="54"></rect><g class="label" style="" transform="translate(-60.8203125, -12)"><rect></rect><foreignObject width="121.640625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>SNS Notifications</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_20_0-flowchart-F-10" data-look="classic" transform="translate(138, 227)"><rect class="basic label-container" style="" x="-96.453125" y="-27" width="192.90625" height="54"></rect><g class="label" style="" transform="translate(-66.453125, -12)"><rect></rect><foreignObject width="132.90625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Synthetic Canaries</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_20_0-flowchart-G-15" data-look="classic" transform="translate(1256.3984375, 163)"><rect class="basic label-container" style="" x="-100.7578125" y="-27" width="201.515625" height="54"></rect><g class="label" style="" transform="translate(-70.7578125, -12)"><rect></rect><foreignObject width="141.515625" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Operators / On-Call</p></span></div></foreignObject></g></g><g class="node default" id="r_dark_20_0-flowchart-H-19" data-look="classic" transform="translate(726.5859375, 173)"><rect class="basic label-container" style="" x="-74.921875" y="-27" width="149.84375" height="54"></rect><g class="label" style="" transform="translate(-44.921875, -12)"><rect></rect><foreignObject width="89.84375" height="24"><div xmlns="http://www.w3.org/1999/xhtml" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="nodeLabel"><p>Logs Insights</p></span></div></foreignObject></g></g></g></g></g><defs><filter id="r_dark_20_0-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"></feDropShadow></filter></defs><defs><filter id="r_dark_20_0-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"></feDropShadow></filter></defs><linearGradient id="r_dark_20_0-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#cccccc" stop-opacity="1"></stop><stop offset="100%" stop-color="hsl(180, 0%, 18.3529411765%)" stop-opacity="1"></stop></linearGradient></svg></div>
+      </figure>
+    </section>
+
+    <section class="sec" id="alarms">
+      <h2>Alarms</h2>
+      <p>Proper alarm settings distinguish real incidents from noise, ensuring on-call teams respond to what actually matters. Structuring alarms intentionally reduces fatigue and ensures the right person acts on the right signal at the right time.</p>
+
+      <h3>Alarm configuration</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Setting</th><th>Recommendation</th><th>Reason</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Evaluation periods</strong></td><td>Use M-of-N evaluation matched to signal frequency and recovery objective</td><td>Reduce noise without delaying detection excessively</td></tr>
+            <tr><td><strong>Threshold</strong></td><td>Tie to an SLO, capacity boundary, or anomaly-detection band</td><td>Actionable signal</td></tr>
+            <tr><td><strong>Treat missing data</strong></td><td>Choose per metric semantics: <code>breaching</code>, <code>notBreaching</code>, <code>ignore</code>, or <code>missing</code></td><td>Prevent false clears and false pages</td></tr>
+            <tr><td><strong>Actions</strong></td><td>SNS notification + automation</td><td>Response</td></tr>
+            <tr><td><strong>Alarm state actions</strong></td><td>OK, ALARM, INSUFFICIENT_DATA</td><td>All states</td></tr>
+            <tr><td><strong>Dimensions</strong></td><td>Specific resource identification</td><td>Targeted alerts</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Alarm best practices</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Practice</th><th>Description</th><th>Benefit</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Hierarchical alarms</strong></td><td>Resource -> Service -> Account levels</td><td>Clear ownership and escalation</td></tr>
+            <tr><td><strong>Composite alarms</strong></td><td>Combine multiple conditions</td><td>Reduce alert fatigue</td></tr>
+            <tr><td><strong>Alarm quotas</strong></td><td>Total alarms per account/Region is an adjustable service quota (not a small fixed number); still avoid alarm sprawl for manageability and cost</td><td>Avoid limits</td></tr>
+            <tr><td><strong>Action diversification</strong></td><td>SNS, Lambda, SSM, EC2 actions</td><td>Flexible response</td></tr>
+            <tr><td><strong>Annotation</strong></td><td>Document alarm purpose</td><td>Operational clarity</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Composite alarms</h3>
+      <p>Combining simple alarms with logic operators creates precise, multi-condition alerts that fire only when the full pattern indicates a real problem.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Operator</th><th>Description</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>AND</strong></td><td>All referenced alarm expressions must be true</td><td>Multi-condition alert</td></tr>
+            <tr><td><strong>OR</strong></td><td>Any referenced alarm expression is true</td><td>Any-condition alert</td></tr>
+            <tr><td><strong>NOT</strong></td><td>Negate an alarm expression</td><td>Suppression or maintenance logic</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="dashboards">
+      <h2>Dashboards</h2>
+      <p>Dashboards are the first screen operators see during an incident; well-designed ones surface the right signals at a glance. Tailoring dashboards to audience and use case ensures each stakeholder sees what they need without distraction.</p>
+
+      <h3>Dashboard design</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Element</th><th>Recommendation</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Widgets</strong></td><td>Metrics, logs, alarms, text, and supported service widgets</td></tr>
+            <tr><td><strong>Layout</strong></td><td>Group by service or application</td></tr>
+            <tr><td><strong>Time range</strong></td><td>Choose a relative or absolute range appropriate to the operational question; keep enough resolution to expose short spikes</td></tr>
+            <tr><td><strong>Cross-account views</strong></td><td>Use cross-account observability or approved dashboard sharing for teams</td></tr>
+            <tr><td><strong>Sharing</strong></td><td>Share through CloudWatch dashboard sharing with the required authentication/public-access controls</td></tr>
+            <tr><td><strong>Cost</strong></td><td>Pricing and free-tier allowances vary; verify the current CloudWatch pricing page</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Dashboard templates</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Dashboard</th><th>Purpose</th><th>Key Widgets</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Executive</strong></td><td>High-level overview</td><td>Cost, errors, uptime</td></tr>
+            <tr><td><strong>Application</strong></td><td>App-specific monitoring</td><td>Latency, errors, throughput</td></tr>
+            <tr><td><strong>Infrastructure</strong></td><td>Resource utilization</td><td>CPU, memory, disk, network</td></tr>
+            <tr><td><strong>Security</strong></td><td>Security monitoring</td><td>Failed logins, API errors</td></tr>
+            <tr><td><strong>Cost</strong></td><td>Cost tracking</td><td>Daily spend, budget alerts</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="logs">
+      <h2>Logs</h2>
+      <p>Log groups are the primary container for CloudWatch Logs; configuring them correctly governs cost, security, and query performance. Log Insights then turns raw log data into actionable answers through purpose-built query capabilities.</p>
+
+      <h3>Log groups</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Setting</th><th>Recommendation</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Retention</strong></td><td>Select an explicit supported period from one day through 10 years, or retain indefinitely only when required</td></tr>
+            <tr><td><strong>Encryption</strong></td><td>KMS encryption for sensitive logs</td></tr>
+            <tr><td><strong>Log class/tiering</strong></td><td>Choose Standard, Infrequent Access, or Intelligent Tiering based on feature and access needs; feature support differs</td></tr>
+            <tr><td><strong>Metric filters</strong></td><td>Extract metrics from log patterns</td></tr>
+            <tr><td><strong>Embedded Metric Format (EMF)</strong></td><td>Emit structured JSON logs that CloudWatch extracts as custom metrics; it avoids direct <code>PutMetricData</code> calls but still incurs log and custom-metric charges</td></tr>
+            <tr><td><strong>Subscription filters</strong></td><td>Stream logs to Lambda, Kinesis</td></tr>
+            <tr><td><strong>Cross-account</strong></td><td>Centralized log aggregation</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Log Insights</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>Description</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Query language</strong></td><td>Purpose-built Logs Insights QL (also supports OpenSearch PPL and standard SQL syntax)</td><td>Ad-hoc analysis</td></tr>
+            <tr><td><strong>Saved queries</strong></td><td>Reusable query templates</td><td>Regular analysis</td></tr>
+            <tr><td><strong>Dashboards</strong></td><td>Log-based visualizations</td><td>Monitoring</td></tr>
+            <tr><td><strong>Live tail</strong></td><td>Real-time log streaming</td><td>Debugging</td></tr>
+            <tr><td><strong>Statistics</strong></td><td>Aggregation functions</td><td>Trend analysis</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Log queries</h3>
+      <p>Knowing the core query functions lets you build effective ad-hoc investigations without memorizing an entire language.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Function</th><th>Description</th><th>Example</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>filter</code></td><td>Filter by pattern</td><td><code>filter @message like /ERROR/</code></td></tr>
+            <tr><td><code>sort</code></td><td>Sort results</td><td><code>sort @timestamp desc</code></td></tr>
+            <tr><td><code>limit</code></td><td>Limit results</td><td><code>limit 100</code></td></tr>
+            <tr><td><code>stats</code></td><td>Aggregation</td><td><code>stats count() by bin(1h)</code></td></tr>
+            <tr><td><code>parse</code></td><td>Parse fields</td><td><code>parse @message /key=(?&lt;value&gt;\S+)/</code></td></tr>
+            <tr><td><code>display</code></td><td>Select columns</td><td><code>display @timestamp, value</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="canaries">
+      <h2>Synthetic Canaries</h2>
+      <p>Canaries simulate real user journeys to detect outages before customers report them; proper configuration ensures they are reliable and cost-effective. Matching canary use cases to real business risks ensures synthetic monitoring delivers measurable value.</p>
+
+      <h3>Canary configuration</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Setting</th><th>Recommendation</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Schedule</strong></td><td>Every 1-5 minutes for critical paths</td></tr>
+            <tr><td><strong>Runtime</strong></td><td>Use a currently supported Synthetics runtime and update it before deprecation</td></tr>
+            <tr><td><strong>Success criteria</strong></td><td>HTTP 200, response time &lt; threshold</td></tr>
+            <tr><td><strong>Failure actions</strong></td><td>Alarm on canary metrics, then route through SNS or approved automation</td></tr>
+            <tr><td><strong>VPC configuration</strong></td><td>Attach the canary to the VPC for private targets and provide routes/endpoints needed for CloudWatch and S3</td></tr>
+            <tr><td><strong>Custom scripts</strong></td><td>Multi-step validation</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Use cases</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Use Case</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Endpoint monitoring</strong></td><td>HTTP/HTTPS endpoint health</td></tr>
+            <tr><td><strong>Workflow monitoring</strong></td><td>Multi-step business process</td></tr>
+            <tr><td><strong>Performance baseline</strong></td><td>Track response time trends</td></tr>
+            <tr><td><strong>Geographic monitoring</strong></td><td>Multiple region execution</td></tr>
+            <tr><td><strong>SSL certificate</strong></td><td>Certificate expiry monitoring</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="anomaly-detection">
+      <h2>Log Anomaly Detection</h2>
+      <p>ML-based anomaly detection surfaces deviations from normal log patterns without requiring manual threshold tuning. Properly scoping and training anomaly detectors prevents false positives and ensures the ML model reflects actual application behavior.</p>
+
+      <h3>Machine learning detection</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Anomaly detection</strong></td><td>ML-based log pattern analysis</td></tr>
+            <tr><td><strong>Pattern extraction</strong></td><td>Groups static and variable portions of log messages</td></tr>
+            <tr><td><strong>Continuous detector</strong></td><td>Evaluates incoming logs after model training</td></tr>
+            <tr><td><strong>Logs Insights command</strong></td><td>Performs on-demand anomaly analysis for a query range</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Configuration</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Setting</th><th>Recommendation</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Training data</strong></td><td>A detector uses up to the prior two weeks of events; initial training can take about 15 minutes</td></tr>
+            <tr><td><strong>Scope</strong></td><td>Use log groups with stable application patterns; the feature is not intended as a network/access anomaly detector</td></tr>
+            <tr><td><strong>Visibility</strong></td><td>Set how long detected anomalies remain visible (21 days by default)</td></tr>
+            <tr><td><strong>Log class</strong></td><td>Requires the Standard log class</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout warning"><div><span class="callout-title">Warning</span><p>Anomaly detection requires the Standard log class and works best on log groups with stable application patterns. It is not intended as a network or access anomaly detector — pair it with dedicated security monitoring for those signals.</p></div></div>
+    </section>
+
+    <section class="sec" id="multi-account-observability">
+      <h2>Application-Centric and Multi-Account Observability</h2>
+      <p>Observability across services and accounts provides a unified view of system health, reducing mean-time-to-resolution for complex, distributed architectures. For distributed tracing that complements metrics and logs, see also <a href="../Monitoring/X-Ray-Best-Practices.html">X-Ray Best Practices</a>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Capability</th><th>Best Practice</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Application Signals</strong></td><td>Use supported OpenTelemetry-based instrumentation to discover services/dependencies, track latency/availability/errors, and define service-level objectives</td></tr>
+            <tr><td><strong>Service-level objectives</strong></td><td>Set objective and warning windows from user expectations; page on actionable burn-rate conditions rather than every single error</td></tr>
+            <tr><td><strong>Cross-account observability</strong></td><td>Use Observability Access Manager sinks in monitoring accounts and links in source accounts; links and sinks are Regional</td></tr>
+            <tr><td><strong>Organization onboarding</strong></td><td>Use AWS Organizations integration so new accounts/OUs are linked consistently</td></tr>
+            <tr><td><strong>Telemetry ownership</strong></td><td>Keep collection configuration, retention, access policies, dashboards, alarms, and runbooks in version control</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="cost-optimization">
+      <h2>Cost Optimization</h2>
+      <p>CloudWatch costs scale with volume; right-sizing retention, resolution, and scope keeps observability affordable at scale. For broader AWS cost strategies, see the <a href="../Cost-Optimization/Cost-Optimization.html">Cost Optimization Guide</a>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Strategy</th><th>Description</th><th>Potential Savings</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Log retention</strong></td><td>Right-size retention period</td><td>Storage cost</td></tr>
+            <tr><td><strong>Log class/tiering</strong></td><td>Select a lower-cost class/tiering model only when required features remain available</td><td>Lower ingestion/storage cost depending on the option</td></tr>
+            <tr><td><strong>Metric consolidation</strong></td><td>Reduce custom metrics</td><td>Per-metric cost</td></tr>
+            <tr><td><strong>Dashboard cleanup</strong></td><td>Remove unused paid dashboards and widgets</td><td>Lower dashboard/API cost</td></tr>
+            <tr><td><strong>Alarm optimization</strong></td><td>Right-size evaluation periods</td><td>Evaluation cost</td></tr>
+            <tr><td><strong>Canary scheduling</strong></td><td>Reduce frequency or use business-hour schedules only for noncritical journeys; continuously test critical paths</td><td>Execution cost</td></tr>
+            <tr><td><strong>Export to S3</strong></td><td>Use export tasks for archival, not as a continuous real-time stream</td><td>CloudWatch storage reduction</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout tip"><div><span class="callout-title">Tip</span><p>Use S3 export tasks for archival rather than as a continuous real-time stream, and keep canaries running continuously only on critical paths — both are of the highest-impact ways to trim CloudWatch spend without losing coverage.</p></div></div>
+    </section>
+
+    <section class="sec" id="cross-service-integration">
+      <h2>Cross-Service Integration</h2>
+      <p>CloudWatch does not operate in isolation; integrating it with other AWS services closes the loop from detection to automated response.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Service</th><th>Integration</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>SNS</td><td>Alarm notifications</td><td>Alerting</td></tr>
+            <tr><td>Lambda</td><td>Log processing, alarm actions</td><td>Automation</td></tr>
+            <tr><td>S3</td><td>Log export, long-term storage</td><td>Archive</td></tr>
+            <tr><td>Kinesis</td><td>Real-time log streaming</td><td>Processing</td></tr>
+            <tr><td>EventBridge</td><td>Alarm and service state-change events</td><td>Event-driven automation</td></tr>
+            <tr><td>X-Ray</td><td>Trace correlation</td><td>Debugging</td></tr>
+            <tr><td>Config</td><td>Resource configuration and compliance</td><td>Governance</td></tr>
+            <tr><td>GuardDuty</td><td>Managed threat detection from supported AWS data sources</td><td>Security</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="additional-practices">
+      <h2>Additional Best Practices</h2>
+      <ul>
+        <li>Standardize account/Region, environment, service, and resource dimensions, but avoid unbounded high-cardinality dimensions such as request IDs in custom metrics.</li>
+        <li>Alarm on symptoms that affect users and on imminent capacity exhaustion. Route notifications through an owned, tested escalation path and document the response in alarm descriptions or runbook links.</li>
+        <li>Use cross-account observability or centralized telemetry accounts for multi-account environments; protect centralized log destinations with least-privilege resource policies.</li>
+        <li>Encrypt sensitive logs, apply data-protection policies where useful, and never emit credentials, authorization headers, or unnecessary personal data.</li>
+        <li>Set explicit retention on every log group and query only the required time range/fields to reduce Logs Insights scan cost.</li>
+      </ul>
+    </section>
+
+    <section class="sec" id="references">
+      <h2>AWS References</h2>
+      <ul>
+        <li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_concepts.html#Metric" target="_blank" rel="noopener">CloudWatch metric retention</a></li>
+        <li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/publishingMetrics.html" target="_blank" rel="noopener">Publishing custom and high-resolution metrics</a></li>
+        <li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch_Logs_Log_Classes.html" target="_blank" rel="noopener">CloudWatch Logs classes</a></li>
+        <li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format.html" target="_blank" rel="noopener">Embedded metric format</a></li>
+        <li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/LogsAnomalyDetection.html" target="_blank" rel="noopener">CloudWatch Logs anomaly detection</a></li>
+        <li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Application-Signals-Enable.html" target="_blank" rel="noopener">CloudWatch Application Signals</a></li>
+        <li><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Unified-Cross-Account.html" target="_blank" rel="noopener">CloudWatch cross-account observability</a></li>
+      </ul>
+    </section>
+
+  </article>
+</main>
+
+<footer class="site-footer">
+  <nav class="pager" aria-label="Adjacent pages">
+    <a class="pager-card prev" href="../DevOps/ECS-EKS-Best-Practices.html"><span class="pager-label">&larr; Previous</span><span class="pager-title">ECS/EKS Best Practices</span></a>
+    <a class="pager-card next" href="../Monitoring/X-Ray-Best-Practices.html"><span class="pager-label">Next &rarr;</span><span class="pager-title">X-Ray Best Practices</span></a>
+  </nav>
+  <div class="topics">
+    <div class="topic-group">
+      <h4>Core Services</h4>
+        <a href="../Core-Services/EC2-Best-Practices.html">EC2</a>
+        <a href="../Core-Services/S3-Best-Practices.html">S3</a>
+        <a href="../Core-Services/IAM-Best-Practices.html">IAM</a>
+        <a href="../Core-Services/VPC-Best-Practices.html">VPC</a>
+    </div>
+    <div class="topic-group">
+      <h4>Database</h4>
+        <a href="../Database/RDS-Best-Practices.html">RDS</a>
+        <a href="../Database/DynamoDB-Best-Practices.html">DynamoDB</a>
+        <a href="../Database/ElastiCache-Best-Practices.html">ElastiCache</a>
+    </div>
+    <div class="topic-group">
+      <h4>Architecture Patterns</h4>
+        <a href="../Design/01-event-driven-patterns.html">Event-driven</a>
+        <a href="../Design/02-communication-patterns.html">Communication</a>
+        <a href="../Design/03-error-handling-patterns.html">Error handling</a>
+        <a href="../Design/04-cross-cutting-patterns.html">Cross-cutting</a>
+        <a href="../Design/05-database-integration-patterns.html">Database integration</a>
+        <a href="../Design/06-high-availability-dr-patterns.html">High availability &amp; DR</a>
+        <a href="../Design/07-caching-content-delivery-patterns.html">Caching &amp; delivery</a>
+        <a href="../Design/08-compute-deployment-patterns.html">Compute &amp; deployment</a>
+        <a href="../Design/09-multi-account-landing-zone-patterns.html">Multi-account</a>
+    </div>
+    <div class="topic-group">
+      <h4>Serverless</h4>
+        <a href="../Serverless/Lambda-Best-Practices.html">Lambda</a>
+        <a href="../Serverless/API-Gateway-Best-Practices.html">API Gateway</a>
+        <a href="../Serverless/EventBridge-Best-Practices.html">EventBridge</a>
+    </div>
+    <div class="topic-group">
+      <h4>Networking</h4>
+        <a href="../Networking/CloudFront-Best-Practices.html">CloudFront</a>
+        <a href="../Networking/Route53-Best-Practices.html">Route 53</a>
+        <a href="../Networking/Load-Balancing-Best-Practices.html">Load balancing</a>
+    </div>
+    <div class="topic-group">
+      <h4>DevOps</h4>
+        <a href="../DevOps/CI-CD-Best-Practices.html">CI/CD</a>
+        <a href="../DevOps/CloudFormation-Best-Practices.html">CloudFormation</a>
+        <a href="../DevOps/ECS-EKS-Best-Practices.html">ECS/EKS</a>
+    </div>
+    <div class="topic-group">
+      <h4>Monitoring</h4>
+        <a href="../Monitoring/CloudWatch-Best-Practices.html" aria-current="page">CloudWatch</a>
+        <a href="../Monitoring/X-Ray-Best-Practices.html">X-Ray</a>
+    </div>
+    <div class="topic-group">
+      <h4>Security</h4>
+        <a href="../Security/WAF-Best-Practices.html">WAF</a>
+        <a href="../Security/KMS-Best-Practices.html">KMS</a>
+        <a href="../Security/Shield-Best-Practices.html">Shield</a>
+    </div>
+    <div class="topic-group">
+      <h4>Cost Optimization</h4>
+        <a href="../Cost-Optimization/Cost-Optimization.html">Guide</a>
+    </div>
+  </div>
+  <p class="foot-note">Community-maintained guidance. Verify service details against current AWS documentation before production use.</p>
+</footer>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>
