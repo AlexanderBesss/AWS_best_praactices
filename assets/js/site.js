@@ -20,7 +20,7 @@
   window.addEventListener("resize", updateProgress);
   updateProgress();
 
-  /* ---------- reveal on scroll ---------- */
+  /* ---------- reveal on scroll (opacity only, calm) ---------- */
   const revealTargets = document.querySelectorAll(".sec, .toc, .card-grid, .callout");
   revealTargets.forEach((el) => el.classList.add("reveal"));
   if ("IntersectionObserver" in window) {
@@ -39,6 +39,18 @@
   } else {
     revealTargets.forEach((el) => el.classList.add("visible"));
   }
+
+  /* ---------- back to top ---------- */
+  const toTop = document.createElement("button");
+  toTop.type = "button";
+  toTop.className = "to-top";
+  toTop.setAttribute("aria-label", "Back to top");
+  toTop.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+  document.body.appendChild(toTop);
+  toTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+  const updateToTop = () => toTop.classList.toggle("show", window.scrollY > 600);
+  window.addEventListener("scroll", updateToTop, { passive: true });
+  updateToTop();
 
   /* ---------- code labels ---------- */
   document.querySelectorAll("pre > code").forEach((code) => {

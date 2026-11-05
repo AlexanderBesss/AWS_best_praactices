@@ -111,6 +111,7 @@
       : "";
 
     return `<div id="scroll-progress"></div>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <header class="site-header">
   <div class="header-inner">
     <button class="menu-btn" type="button" aria-label="Toggle navigation menu" aria-expanded="false">
@@ -226,6 +227,7 @@ ${groups}
   function mount() {
     const main = document.querySelector("main.page");
     if (!main) return;
+    main.id = "main-content";
     try {
       const body = document.body;
       body.insertAdjacentHTML("afterbegin", headerHtml());
